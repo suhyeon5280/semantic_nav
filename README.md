@@ -1,5 +1,5 @@
 # OmniVLA_edge
-OmniVLA-edge is under construction for official release. Until the official release, we do not response for your questions. 
+OmniVLA-edge is under construction for official release. Until the official release, we will not respond for your questions. 
 Sorry for your inconvenience and understanding. Thank you.
 
     ```
