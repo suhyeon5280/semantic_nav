@@ -1,5 +1,5 @@
 train/config_/
-prismatic/vla/datasets/sampler/
+train/vint_train/data/sampler/
 # Ignore all __pycache__ directories everywhere
 **/__pycache__/
 # Ignore all wandb directories everywhere
