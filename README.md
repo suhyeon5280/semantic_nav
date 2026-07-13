@@ -142,7 +142,39 @@ python train.py -c config/frodo_lan_ft.yaml
 
 ---
 
-## 5. 알려진 문제 / 주의점
+## 5. 성능 비교 (base vs 파인튜닝) — `eval_compare.py`
+
+학습과 별개로, **원본과 파인튜닝본을 test 분할에서 나란히 비교**하는 독립 스크립트입니다.
+두 체크포인트 파일 모두 수정하지 않습니다.
+
+```bash
+cd train
+python eval_compare.py                                   # base=config, ft=logs_frodo_lan_ft/best.pth
+python eval_compare.py --ft ./logs_frodo_lan_ft/latest.pth
+python eval_compare.py --base ./omnivla-edge.pth --ft ./logs_frodo_lan_ft/best.pth
+```
+
+출력 예:
+```
+=== Language-goal (mask 7) metrics on frodo_lan TEST split ===
+metric                  base    finetuned        delta   better
+action_mse            0.xxxx      0.xxxx      -0.xxxx   (lower)  <-- improved
+waypoint_err_m        0.xxxx      0.xxxx      -0.xxxx   (lower)  <-- improved
+endpoint_err_m        0.xxxx      0.xxxx      -0.xxxx   (lower)
+object_err_m          0.xxxx      0.xxxx      -0.xxxx   (lower)
+heading_cos           0.xxxx      0.xxxx      +0.xxxx   (higher) <-- improved
+
+=== Basic-driving regression: image-goal (mask 6) divergence, base vs fine-tuned ===
+  base_divergence(image-goal) = 0.xxxx
+```
+- **언어 지시 수행이 좋아졌나** → `action_mse`/`waypoint_err_m`/`endpoint_err_m`/`object_err_m`가 base보다 **낮으면** 개선, `heading_cos`는 **높으면** 개선.
+- **기본 주행이 망가졌나** → `base_divergence(image-goal)`가 **작으면** 이미지-goal 주행이 보존된 것.
+- `waypoint_err_m`/`endpoint_err_m`/`object_err_m`는 **미터 단위**(정규화 0.12 반영)라 직관적으로 해석됩니다.
+
+> 지표는 `nomad_traj_norm`(데이터의 궤적 라벨) 기준입니다. 궁극적으로는 실제 로봇/시뮬레이터에서의
+> 정성 평가가 가장 신뢰도 높습니다.
+
+## 6. 알려진 문제 / 주의점
 
 ### 이 레포 전반 (원본 정리 전 코드)
 - **그대로는 원본 전체 학습(`omnivla_edge.yaml`) 불가**:
@@ -162,7 +194,7 @@ python train.py -c config/frodo_lan_ft.yaml
 
 ---
 
-## 6. 원본 전체 학습을 하려면 (참고)
+## 7. 원본 전체 학습을 하려면 (참고)
 
 `lan_only_ft` 없이 원본 멀티모달 학습(`config/omnivla_edge.yaml`)을 돌리려면 추가로 필요:
 1. `diffusion_policy`, `map_cache` 모듈 확보

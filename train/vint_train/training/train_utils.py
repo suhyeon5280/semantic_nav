@@ -10087,3 +10087,60 @@ def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transf
         "test_obj_loss": float(np.mean(obj_losses)) if obj_losses else float("nan"),
         "base_divergence_imagegoal": float(np.mean(base_divs)) if base_divs else float("nan"),
     }
+
+
+@torch.no_grad()
+def eval_metrics_lan(model, text_encoder, dataloader_lan, transform, device, goal_mask_value=7, mws=0.12):
+    """
+    Detailed language-goal (default mask 7) metrics on a loader, for base-vs-finetuned comparison.
+      action_mse      : MSE over the full (8,4) trajectory vs the dataset nomad_traj_norm (lower better)
+      waypoint_err_m  : mean per-waypoint position error in meters (lower better)
+      endpoint_err_m  : final-waypoint position error in meters (lower better)
+      object_err_m    : final waypoint vs annotated object pose, meters (lower better)
+      heading_cos     : mean cos-sim of predicted vs GT heading channels (higher better)
+    """
+    was_training = model.training
+    model.eval(); text_encoder.eval()
+    n = 0
+    s_act = s_pos = s_end = s_obj = s_cos = 0.0
+    for data in dataloader_lan:
+        (obs_images_lan, goal_image_lan, cur_large_img_lan, goal_pos_lan, obj_inst_lan,
+         goal_pos_norm_lan, goal_image_full_lan, goal_image_full_8_lan, distance_lan,
+         action_mask_lan, nomad_traj_lan) = data
+        B = obs_images_lan.shape[0]
+        obs_list = torch.split(obs_images_lan, 3, dim=1)
+        obs_map = obs_list[-1].to(device)
+        obs = torch.cat([transform(x).to(device) for x in obs_list], dim=1)
+        cur_map = torch.zeros(B, 3, 96, 96); goal_map = torch.zeros(B, 3, 96, 96)
+        map_images = torch.cat((transform(cur_map).to(device), transform(goal_map).to(device), obs_map), axis=1)
+        goal_img = transform(goal_image_full_lan).to(device)
+        cur_large = transform(cur_large_img_lan).to(device)
+        tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
+        feat = text_encoder.encode_text(tokens)
+        gp = goal_pos_lan.to(device)
+        dis = torch.sqrt(gp[:, 1:2] ** 2 + gp[:, 0:1] ** 2) + 1e-6
+        goal_pose = torch.cat((gp[:, 1:2], -gp[:, 0:1], gp[:, 1:2] / dis, -gp[:, 0:1] / dis), axis=1).to(device)
+        gm = torch.full((B,), goal_mask_value, dtype=torch.long, device=device)
+        pred, dpred, _ = model(obs, goal_pose, map_images, goal_img, gm, feat, cur_large)
+        gt = nomad_traj_lan.to(device)
+        s_act += F.mse_loss(pred, gt).item() * B
+        pos_err = torch.norm(pred[:, :, 0:2] - gt[:, :, 0:2], dim=-1)   # (B,8) normalized units
+        s_pos += pos_err.mean().item() * B
+        s_end += pos_err[:, -1].mean().item() * B
+        s_obj += torch.norm(pred[:, -1, 0:2] * mws - gp, dim=-1).mean().item() * B
+        s_cos += F.cosine_similarity(pred[:, :, 2:], gt[:, :, 2:], dim=-1).mean().item() * B
+        n += B
+    if was_training:
+        model.train()
+    if n == 0:
+        d = {k: float("nan") for k in ["action_mse", "waypoint_err_m", "endpoint_err_m", "object_err_m", "heading_cos"]}
+        d["n"] = 0
+        return d
+    return {
+        "action_mse": s_act / n,
+        "waypoint_err_m": (s_pos / n) * mws,
+        "endpoint_err_m": (s_end / n) * mws,
+        "object_err_m": s_obj / n,
+        "heading_cos": s_cos / n,
+        "n": n,
+    }
