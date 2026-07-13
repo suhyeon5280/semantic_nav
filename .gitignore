@@ -4,3 +4,7 @@ train/vint_train/data/sampler/
 **/__pycache__/
 # Ignore all wandb directories everywhere
 **/wandb/
+# Model checkpoints (do not commit large weights, incl. omnivla-edge.pth)
+*.pth
+# Fine-tune output dir
+train/logs_frodo_lan_ft/

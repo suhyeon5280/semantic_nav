@@ -74,4 +74,7 @@ youtube:
 
 bdd:
   metric_waypoint_spacing: 0.12
+
+frodo_lan:
+  metric_waypoint_spacing: 0.12
 # add your own dataset params here:

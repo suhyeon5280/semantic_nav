@@ -152,33 +152,61 @@ class LeLaN_Dataset(Dataset):
         return [item for item in A if item not in B]
             
     def _load_split_index(self):
+        if self.dataset_name == "frodo_lan":
+            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
+            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
+            # No random crop (keep image/trajectory alignment exact).
+            self.v_random = 0.0
+            self.h_random = 0.0
+            image_path = []
+            pickle_path = []
+            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
+            number_files = len(lst)
+            ratio = 0.9
+            thres = int(number_files * ratio)
+            if self.data_split_type == "train":
+                print("frodo_lan train frame num", thres)
+            else:
+                print("frodo_lan test frame num", number_files - thres)
+            # reserve last 8 frames so the iv+8 goal lookup stays in range
+            for num in range(int(number_files) - 8):
+                if self.data_split_type == "train" and num < thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+                elif self.data_split_type == "test" and num >= thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+            self.image_path = image_path
+            self.pickle_path = pickle_path
+            return
+
         if self.dataset_name == "go_stanford4":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping
-            
+
             lst = os.listdir(self.data_image_folder) # your directory path
             number_files = len(lst)
-            
+
             image_path = []
-            pickle_path = []  
-            
+            pickle_path = []
+
             ratio = 0.9
             thres = int(number_files*ratio)
-            
+
             if self.data_split_type == "train":
                 print("go_stanford4 train flame num", thres)
             else:
-                print("go_stanford4 test flame num", number_files-thres)            
-             
+                print("go_stanford4 test flame num", number_files-thres)
+
             #TODO -5 is come from "self.data_image_folder" includes 5 files, which is not pickle file.
             for num in range(int(number_files - 5)-3):
                 if self.data_split_type == "train" and num < thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                               
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
                 elif self.data_split_type == "test" and num >= thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                                     
-      
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+
         if self.dataset_name == "sacson":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping 
@@ -585,33 +613,61 @@ class LeLaN_Dataset_multi(Dataset):
         return [item for item in A if item not in B]
             
     def _load_split_index(self):
+        if self.dataset_name == "frodo_lan":
+            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
+            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
+            # No random crop (keep image/trajectory alignment exact).
+            self.v_random = 0.0
+            self.h_random = 0.0
+            image_path = []
+            pickle_path = []
+            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
+            number_files = len(lst)
+            ratio = 0.9
+            thres = int(number_files * ratio)
+            if self.data_split_type == "train":
+                print("frodo_lan train frame num", thres)
+            else:
+                print("frodo_lan test frame num", number_files - thres)
+            # reserve last 8 frames so the iv+8 goal lookup stays in range
+            for num in range(int(number_files) - 8):
+                if self.data_split_type == "train" and num < thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+                elif self.data_split_type == "test" and num >= thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+            self.image_path = image_path
+            self.pickle_path = pickle_path
+            return
+
         if self.dataset_name == "go_stanford4":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping
-            
+
             lst = os.listdir(self.data_image_folder) # your directory path
             number_files = len(lst)
-            
+
             image_path = []
-            pickle_path = []  
-            
+            pickle_path = []
+
             ratio = 0.9
             thres = int(number_files*ratio)
-            
+
             if self.data_split_type == "train":
                 print("go_stanford4 train flame num", thres)
             else:
-                print("go_stanford4 test flame num", number_files-thres)            
-             
+                print("go_stanford4 test flame num", number_files-thres)
+
             #TODO -5 is come from "self.data_image_folder" includes 5 files, which is not pickle file.
             for num in range(int(number_files - 5)-3):
                 if self.data_split_type == "train" and num < thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                               
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
                 elif self.data_split_type == "test" and num >= thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                                     
-      
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+
         if self.dataset_name == "sacson":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping 
@@ -1047,33 +1103,61 @@ class LeLaN_Dataset_multi(Dataset):
         return [item for item in A if item not in B]
             
     def _load_split_index(self):
+        if self.dataset_name == "frodo_lan":
+            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
+            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
+            # No random crop (keep image/trajectory alignment exact).
+            self.v_random = 0.0
+            self.h_random = 0.0
+            image_path = []
+            pickle_path = []
+            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
+            number_files = len(lst)
+            ratio = 0.9
+            thres = int(number_files * ratio)
+            if self.data_split_type == "train":
+                print("frodo_lan train frame num", thres)
+            else:
+                print("frodo_lan test frame num", number_files - thres)
+            # reserve last 8 frames so the iv+8 goal lookup stays in range
+            for num in range(int(number_files) - 8):
+                if self.data_split_type == "train" and num < thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+                elif self.data_split_type == "test" and num >= thres:
+                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+            self.image_path = image_path
+            self.pickle_path = pickle_path
+            return
+
         if self.dataset_name == "go_stanford4":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping
-            
+
             lst = os.listdir(self.data_image_folder) # your directory path
             number_files = len(lst)
-            
+
             image_path = []
-            pickle_path = []  
-            
+            pickle_path = []
+
             ratio = 0.9
             thres = int(number_files*ratio)
-            
+
             if self.data_split_type == "train":
                 print("go_stanford4 train flame num", thres)
             else:
-                print("go_stanford4 test flame num", number_files-thres)            
-             
+                print("go_stanford4 test flame num", number_files-thres)
+
             #TODO -5 is come from "self.data_image_folder" includes 5 files, which is not pickle file.
             for num in range(int(number_files - 5)-3):
                 if self.data_split_type == "train" and num < thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                               
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
                 elif self.data_split_type == "test" and num >= thres:
                     image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')                                     
-      
+                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
+
         if self.dataset_name == "sacson":
             self.v_random = 0.2 #for random cropping
             self.h_random = 0.1 #for random cropping 
@@ -1215,6 +1299,8 @@ class LeLaN_Dataset_multi(Dataset):
                 action_label (torch.Tensor): tensor of shape (5, 2) or (5, 4) (if training with angle) containing the action labels from the observation to the goal
                 which_dataset (torch.Tensor): index of the datapoint in the dataset [for identifying the dataset for visualization when using multiple datasets]
         """
+        if getattr(self, "dataset_name", None) == "frodo_lan":
+            return self._getitem_frodo_lan(i)
         flag_data = 0
         flag_data_inner = 0
         iv = i
@@ -1405,3 +1491,79 @@ class LeLaN_Dataset_multi(Dataset):
             torch.as_tensor(goal_id, dtype=torch.float32),  
             torch.as_tensor(action_mask, dtype=torch.float32),             
         )                   
+
+    def _getitem_frodo_lan(self, i: int):
+        """
+        frodo_lan: custom LeLaN-format data that already contains `nomad_traj_norm`
+        (8,4) = cumulative (x=forward, y=left) waypoints + (cos, sin), normalized by
+        metric_waypoint_spacing. Returns an 11-tuple: the standard LeLaN_Dataset_multi
+        fields PLUS the precomputed trajectory as the last element. No NoMaD needed.
+        """
+        iv = i
+        objs = self.aug_data_list[iv]
+        tries = 0
+        while len(objs) == 0 and tries < 50:
+            iv = random.randint(0, len(self.image_path) - 1)
+            objs = self.aug_data_list[iv]
+            tries += 1
+        ir = random.randint(0, len(objs) - 1) if len(objs) > 0 else 0
+        obj = objs[ir]
+
+        # images loaded as [3,H,W] in [0,1]; force 224x224 so bbox-space crop is valid
+        image_fullsize = TF.resize(self._load_image_front(self.image_path[iv]), (224, 224))
+        context_image = [image_fullsize]
+        for ih in range(1, self.context_size + 1):
+            j = iv - ih
+            context_image.append(TF.resize(self._load_image_front(self.image_path[j if j >= 0 else 0]), (224, 224)))
+        image_obs_list = [self._resize_norm(im, self.image_size) for im in context_image]
+        image_obs = torch.cat(image_obs_list[::-1])  # oldest -> newest (current last)
+
+        cur_image_large = self._resize_norm(image_fullsize, self.image_size_clip)
+
+        goal_id = 0
+        try:
+            goal_full = TF.resize(self._load_image_front(self.image_path[iv + goal_id]), (224, 224))
+        except Exception:
+            goal_full = image_fullsize
+        try:
+            goal_full_8 = TF.resize(self._load_image_front(self.image_path[iv + 8]), (224, 224))
+        except Exception:
+            goal_full_8 = image_fullsize
+        goal_image_full = self._resize_norm(goal_full, self.image_size)
+        goal_image_full_8 = self._resize_norm(goal_full_8, self.image_size)
+
+        # object crop: bbox (1,4) = [[top, bottom, left, right]] in 224 space
+        bbox = np.asarray(obj["bbox"]).reshape(-1).astype(int)
+        t, b, l, r = [int(max(0, min(223, int(v)))) for v in bbox[:4]]
+        if b <= t:
+            b = min(t + 1, 224)
+        if r <= l:
+            r = min(l + 1, 224)
+        image_crop = self._resize_norm(image_fullsize[:, t:b, l:r], self.image_size)
+
+        # prompt (list; each entry may be a 1-tuple like ('asphalt road',))
+        prompts = obj["prompt"]
+        p = prompts[random.randint(0, len(prompts) - 1)]
+        inst_obj = p[0] if isinstance(p, (list, tuple)) else p
+
+        # object pose in robot frame (forward, left)
+        pose_median = np.asarray(obj["pose_median"]).reshape(-1).astype(np.float32)
+        ob_pose = np.array((pose_median[0], pose_median[1]), dtype=np.float32)
+        pose_norm = np.asarray(obj["pose_median_norm"]).reshape(-1).astype(np.float32)
+
+        # precomputed NoMaD trajectory (8,4): (x=fwd, y=left, cos, sin)
+        nomad_traj = np.asarray(obj["nomad_traj_norm"], dtype=np.float32)
+
+        return (
+            torch.as_tensor(image_obs, dtype=torch.float32),
+            torch.as_tensor(image_crop, dtype=torch.float32),
+            torch.as_tensor(cur_image_large, dtype=torch.float32),
+            torch.as_tensor(ob_pose, dtype=torch.float32),
+            inst_obj,
+            torch.as_tensor(pose_norm, dtype=torch.float32),
+            torch.as_tensor(goal_image_full, dtype=torch.float32),
+            torch.as_tensor(goal_image_full_8, dtype=torch.float32),
+            torch.as_tensor(float(goal_id), dtype=torch.float32),
+            torch.as_tensor(1.0, dtype=torch.float32),
+            torch.as_tensor(nomad_traj, dtype=torch.float32),
+        )

@@ -3,7 +3,10 @@ import sys
 path_mapcache = "/nfs/kun2/users/noriaki/map_cache/"
 #path_mapcache = "/media/noriaki/Noriaki_Data2/map_cache"
 sys.path.append(path_mapcache)
-from map_cache import MapTileCache
+try:
+    from map_cache import MapTileCache
+except Exception:
+    MapTileCache = None  # only needed for the satellite-map (frodobot) training paths
 
 import wandb
 import os
@@ -9866,3 +9869,139 @@ def calculate_fov(K, image_size):
     vfov = 2 * np.arctan(H / (2 * f_y)) * (180 / np.pi)  # Convert to degrees
     
     return hfov, vfov
+
+
+def train_lan_only_ft(
+    model,
+    text_encoder,
+    optimizer,
+    dataloader_lan,
+    transform,
+    device,
+    project_folder,
+    epoch,
+    print_log_freq: int = 20,
+    use_wandb: bool = False,
+):
+    """
+    Language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on `frodo_lan` data.
+    Uses the precomputed `nomad_traj_norm` from the dataset as the action label, so NO
+    runtime NoMaD / ExAug teacher is required. Only the LeLaN stream is used.
+    """
+    model.train()
+    text_encoder.eval().to(device)
+
+    total_loss_logger = Logger("total_loss", "train", window_size=print_log_freq)
+    action_loss_logger = Logger("action_loss", "train", window_size=print_log_freq)
+    obj_loss_logger = Logger("obj_loss", "train", window_size=print_log_freq)
+
+    with tqdm.tqdm(dataloader_lan, desc=f"lan-ft ep{epoch}", leave=False) as tepoch:
+        for i, data in enumerate(tepoch):
+            (
+                obs_images_lan,
+                goal_image_lan,          # object crop (unused here; kept for tuple parity)
+                cur_large_img_lan,
+                goal_pos_lan,
+                obj_inst_lan,
+                goal_pos_norm_lan,
+                goal_image_full_lan,
+                goal_image_full_8_lan,   # unused in lan-only path
+                distance_lan,
+                action_mask_lan,
+                nomad_traj_lan,          # (B, 8, 4) precomputed trajectory label
+            ) = data
+
+            Blan = obs_images_lan.shape[0]
+
+            # ----- image tensors (mirror the lan handling in the full training loop) -----
+            obs_images_lan_list = torch.split(obs_images_lan, 3, dim=1)
+            obs_image_lan_map = obs_images_lan_list[-1].to(device)        # raw last frame (for map stack)
+            obs_image_lan = torch.cat([transform(x).to(device) for x in obs_images_lan_list], dim=1)
+
+            cur_map = torch.zeros(Blan, 3, 96, 96)
+            goal_map = torch.zeros(Blan, 3, 96, 96)
+            map_images_lan = torch.cat(
+                (transform(cur_map).to(device), transform(goal_map).to(device), obs_image_lan_map), axis=1
+            )
+
+            goal_img = transform(goal_image_full_lan).to(device)
+            cur_large_img = transform(cur_large_img_lan).to(device)
+
+            # ----- text feature -----
+            tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
+            with torch.no_grad():
+                feat_text_lan = text_encoder.encode_text(tokens)
+
+            # ----- goal-pose (gps) token from object pose (forward, left) -----
+            goal_pos_lan = goal_pos_lan.to(device)
+            dis_obj = torch.sqrt(goal_pos_lan[:, 1:2] ** 2 + goal_pos_lan[:, 0:1] ** 2) + 1e-6
+            goal_pose_gps_lan = torch.cat(
+                (
+                    goal_pos_lan[:, 1:2],
+                    -goal_pos_lan[:, 0:1],
+                    goal_pos_lan[:, 1:2] / dis_obj,
+                    -goal_pos_lan[:, 0:1] / dis_obj,
+                ),
+                axis=1,
+            ).to(device)
+
+            # ----- goal modality mask: 7 = language-only, 8 = language + gps -----
+            goal_mask_lan = torch.tensor(
+                [random.choice([7, 8]) for _ in range(Blan)], dtype=torch.long
+            ).to(device)
+
+            action_pred, dist_pred, mask_number = model(
+                obs_image_lan,
+                goal_pose_gps_lan,
+                map_images_lan,
+                goal_img,
+                goal_mask_lan,
+                feat_text_lan,
+                cur_large_img,
+            )
+
+            # ----- labels -----
+            action_label = nomad_traj_lan.to(device)                     # (B, 8, 4)
+            metric_waypoint_spacing = 0.125
+            tar_obj_pose = goal_pos_lan / metric_waypoint_spacing
+            mask_lan = (goal_mask_lan == 7) | (goal_mask_lan == 8)
+            dist_label = distance_lan.float().to(device)
+            action_mask = action_mask_lan.float().to(device)
+
+            losses = _compute_losses_lan(
+                dist_label=dist_label,
+                action_label=action_label,
+                dist_pred=dist_pred,
+                action_pred=action_pred,
+                pose_obj_label=tar_obj_pose[mask_lan],
+                pose_obj_pred=action_pred[:, -1, 0:2][mask_lan],
+                alpha=0.5,
+                learn_angle=True,
+                image_solo=False,
+                sate_solo=False,
+                action_mask=action_mask,
+            )
+
+            optimizer.zero_grad()
+            losses["total_loss"].backward()
+            optimizer.step()
+
+            total_loss_logger.log_data(losses["total_loss"].item())
+            action_loss_logger.log_data(losses["action_loss"].item())
+            obj_loss_logger.log_data(losses["obj_loss"].item())
+
+            if print_log_freq != 0 and i % print_log_freq == 0:
+                print(
+                    f"(epoch {epoch}) (batch {i}/{len(dataloader_lan) - 1}) "
+                    f"total={total_loss_logger.latest():.4f} "
+                    f"action={action_loss_logger.latest():.4f} "
+                    f"obj={obj_loss_logger.latest():.4f}"
+                )
+                if use_wandb:
+                    wandb.log(
+                        {
+                            "total_loss": losses["total_loss"].item(),
+                            "action_loss": losses["action_loss"].item(),
+                            "obj_loss": losses["obj_loss"].item(),
+                        }
+                    )

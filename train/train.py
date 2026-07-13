@@ -31,7 +31,10 @@ from vint_train.models.il.il import IL_dist, IL_gps, IL_gps_map_mask, IL_gps_map
 from vint_train.models.vint.vit import ViT
 from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
 from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
-from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
+try:
+    from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
+except Exception:
+    ConditionalUnet1D = None  # only needed for the diffusion/NoMaD paths (not lan_only_ft)
 
 from vint_train.models.lelan.lelan import LeLaN_clip, LeLaN_clip_temp, DenseNetwork_lelan
 from vint_train.models.lelan.lelan_comp import LeLaN_clip_FiLM, LeLaN_clip_FiLM_temp
@@ -59,12 +62,112 @@ from vint_train.training.train_eval_loop import (
     train_eval_loop_il_exaug_dist_gnm_gps_map2_lan_bdd,
     load_model,
 )
+from vint_train.training.train_utils import train_lan_only_ft
 #path_save_load = "."
 path_save_load = "/nfs/kun2/users/noriaki/checkpoints"
 
 os.environ["OMP_NUM_THREADS"] = "30"  # Set number of OpenMP threads
 os.environ["MKL_NUM_THREADS"] = "30"  # Set number of MKL threads
 torch.set_num_threads(30)  # Limit the number of CPU threads used by PyTorch
+
+def main_lan_only_ft(config, device, transform):
+    """
+    Minimal language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on custom
+    LeLaN-format data (`frodo_lan`) whose pickles already contain `nomad_traj_norm`.
+    Builds ONLY the LeLaN dataloader (no frodobot/gnm/bdd), loads omnivla-edge.pth,
+    and trains with `train_lan_only_ft` (no NoMaD / ExAug teacher).
+    """
+    dc = config["datasets_lan"]["frodo_lan"]
+
+    def make_ds(split):
+        return LeLaN_Dataset_multi(
+            data_split_folder=dc[split],
+            dataset_name="frodo_lan",
+            image_size=config["image_size"],
+            waypoint_spacing=dc.get("waypoint_spacing", 1),
+            len_traj_pred=config["len_traj_pred"],
+            learn_angle=config["learn_angle"],
+            context_size=config["context_size"],
+            data_split_type=split,
+            data_image_folder=dc["image"],
+            data_pickle_folder=dc["pickle"],
+            lan_solo=True,
+            context_type=config.get("context_type", "temporal"),
+            normalize=config["normalize"],
+            backside=dc.get("backside", False),
+            aug_seq=dc.get("aug_seq", False),
+            only_front=dc.get("only_front", True),
+        )
+
+    train_ds = make_ds("train")
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=config["num_workers"],
+        drop_last=True,
+    )
+
+    model = IL_gps_map_mask3_lan2(
+        context_size=config["context_size"],
+        len_traj_pred=config["len_traj_pred"],
+        learn_angle=config["learn_angle"],
+        obs_encoder=config["obs_encoder"],
+        obs_encoding_size=config["obs_encoding_size"],
+        late_fusion=config["late_fusion"],
+        mha_num_attention_heads=config["mha_num_attention_heads"],
+        mha_num_attention_layers=config["mha_num_attention_layers"],
+        mha_ff_dim_factor=config["mha_ff_dim_factor"],
+    )
+
+    ckpt_path = config["load_edge_ckpt"]
+    print("Loading edge checkpoint from", ckpt_path)
+    sd = torch.load(ckpt_path, map_location="cpu")
+    if isinstance(sd, dict) and "state_dict" in sd:
+        sd = sd["state_dict"]
+    sd = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    print(f"[ckpt] loaded. missing={len(missing)} unexpected={len(unexpected)}")
+    if len(missing) > 0:
+        print("  missing (first 10):", missing[:10])
+    if len(unexpected) > 0:
+        print("  unexpected (first 10):", unexpected[:10])
+    model = model.to(device)
+
+    text_encoder, _ = clip.load(config["clip_type"])
+    text_encoder.to(torch.float32).to(device)
+
+    optimizer = AdamW(model.parameters(), lr=float(config["lr"]))
+    scheduler = None
+    if config.get("scheduler") is not None and str(config["scheduler"]).lower() == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
+
+    out = config.get("output_dir", "./logs_frodo_lan_ft")
+    os.makedirs(out, exist_ok=True)
+    print("Saving fine-tuned checkpoints to", out)
+
+    for epoch in range(config["epochs"]):
+        train_lan_only_ft(
+            model=model,
+            text_encoder=text_encoder,
+            optimizer=optimizer,
+            dataloader_lan=train_loader,
+            transform=transform,
+            device=device,
+            project_folder=out,
+            epoch=epoch,
+            print_log_freq=config.get("print_log_freq", 20),
+            use_wandb=config["use_wandb"],
+        )
+        if scheduler is not None:
+            scheduler.step()
+        torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
+        if epoch % int(config.get("save_freq", 1)) == 0:
+            torch.save(model.state_dict(), os.path.join(out, f"{epoch}.pth"))
+        print(f"[save] epoch {epoch} -> {os.path.join(out, 'latest.pth')}")
+
+    print("FINISHED LAN-ONLY FINE-TUNE")
+
 
 def main(config):
     assert config["distance"]["min_dist_cat"] < config["distance"]["max_dist_cat"]
@@ -98,6 +201,11 @@ def main(config):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
     transform = transforms.Compose(transform)
+
+    # ---- language-only fine-tune path (frodo_lan): no frodobot/gnm/bdd data, no NoMaD ----
+    if config.get("lan_only_ft", False):
+        main_lan_only_ft(config, device, transform)
+        return
 
     # Load the data
     train_dataset = []
@@ -1702,6 +1810,17 @@ if __name__ == "__main__":
         user_config = yaml.safe_load(f)
 
     config.update(user_config)
+
+    if config.get("lan_only_ft", False):
+        # self-contained fine-tune: skip the frodobot project_folder / wandb-resume setup
+        config.setdefault("project_folder", config.get("output_dir", "./logs_frodo_lan_ft"))
+        if config.get("use_wandb", False):
+            wandb.init(project=config["project_name"], settings=wandb.Settings(start_method="fork"))
+            wandb.run.name = config["run_name"]
+            wandb.config.update(config, allow_val_change=True)
+        main(config)
+        raise SystemExit(0)
+
     if config["keep_learning"]:
         if "load_run" in config: 
             config["project_folder"] = os.path.join(path_save_load, "logs", config["load_run"])
