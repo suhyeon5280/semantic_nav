@@ -62,7 +62,7 @@ from vint_train.training.train_eval_loop import (
     train_eval_loop_il_exaug_dist_gnm_gps_map2_lan_bdd,
     load_model,
 )
-from vint_train.training.train_utils import train_lan_only_ft
+from vint_train.training.train_utils import train_lan_only_ft, evaluate_lan_only_ft
 #path_save_load = "."
 path_save_load = "/nfs/kun2/users/noriaki/checkpoints"
 
@@ -72,10 +72,12 @@ torch.set_num_threads(30)  # Limit the number of CPU threads used by PyTorch
 
 def main_lan_only_ft(config, device, transform):
     """
-    Minimal language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on custom
-    LeLaN-format data (`frodo_lan`) whose pickles already contain `nomad_traj_norm`.
-    Builds ONLY the LeLaN dataloader (no frodobot/gnm/bdd), loads omnivla-edge.pth,
-    and trains with `train_lan_only_ft` (no NoMaD / ExAug teacher).
+    Conservative, language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on
+    custom LeLaN-format data (`frodo_lan`) whose pickles already contain `nomad_traj_norm`.
+      * builds ONLY the LeLaN loaders (no frodobot/gnm/bdd, no NoMaD/ExAug teacher)
+      * optionally freezes the EfficientNet vision encoders (freeze_backbone)
+      * held-out eval each epoch + early stopping on test language action-loss
+      * base-vs-finetuned IMAGE-GOAL divergence to check basic driving isn't broken
     """
     dc = config["datasets_lan"]["frodo_lan"]
 
@@ -99,74 +101,117 @@ def main_lan_only_ft(config, device, transform):
             only_front=dc.get("only_front", True),
         )
 
-    train_ds = make_ds("train")
     train_loader = DataLoader(
-        train_ds,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=config["num_workers"],
-        drop_last=True,
+        make_ds("train"), batch_size=config["batch_size"], shuffle=True,
+        num_workers=config["num_workers"], drop_last=True,
+    )
+    test_loader = DataLoader(
+        make_ds("test"), batch_size=config.get("eval_batch_size", config["batch_size"]),
+        shuffle=False, num_workers=config["num_workers"], drop_last=False,
     )
 
-    model = IL_gps_map_mask3_lan2(
-        context_size=config["context_size"],
-        len_traj_pred=config["len_traj_pred"],
-        learn_angle=config["learn_angle"],
-        obs_encoder=config["obs_encoder"],
-        obs_encoding_size=config["obs_encoding_size"],
-        late_fusion=config["late_fusion"],
-        mha_num_attention_heads=config["mha_num_attention_heads"],
-        mha_num_attention_layers=config["mha_num_attention_layers"],
-        mha_ff_dim_factor=config["mha_ff_dim_factor"],
-    )
+    def build_model():
+        return IL_gps_map_mask3_lan2(
+            context_size=config["context_size"], len_traj_pred=config["len_traj_pred"],
+            learn_angle=config["learn_angle"], obs_encoder=config["obs_encoder"],
+            obs_encoding_size=config["obs_encoding_size"], late_fusion=config["late_fusion"],
+            mha_num_attention_heads=config["mha_num_attention_heads"],
+            mha_num_attention_layers=config["mha_num_attention_layers"],
+            mha_ff_dim_factor=config["mha_ff_dim_factor"],
+        )
+
+    def load_ckpt(m, path):
+        sd = torch.load(path, map_location="cpu")
+        if isinstance(sd, dict) and "state_dict" in sd:
+            sd = sd["state_dict"]
+        sd = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
+        return m.load_state_dict(sd, strict=False)
 
     ckpt_path = config["load_edge_ckpt"]
     print("Loading edge checkpoint from", ckpt_path)
-    sd = torch.load(ckpt_path, map_location="cpu")
-    if isinstance(sd, dict) and "state_dict" in sd:
-        sd = sd["state_dict"]
-    sd = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
-    missing, unexpected = model.load_state_dict(sd, strict=False)
+    model = build_model()
+    missing, unexpected = load_ckpt(model, ckpt_path)
     print(f"[ckpt] loaded. missing={len(missing)} unexpected={len(unexpected)}")
-    if len(missing) > 0:
+    if missing:
         print("  missing (first 10):", missing[:10])
-    if len(unexpected) > 0:
+    if unexpected:
         print("  unexpected (first 10):", unexpected[:10])
     model = model.to(device)
+
+    # frozen reference copy of the ORIGINAL weights for the basic-driving regression check
+    base_model = build_model()
+    load_ckpt(base_model, ckpt_path)
+    base_model = base_model.to(device).eval()
+    for p in base_model.parameters():
+        p.requires_grad = False
+
+    # ---- freeze the vision backbones (recommended for tiny fine-tune sets) ----
+    freeze_backbone = config.get("freeze_backbone", True)
+    if freeze_backbone:
+        for enc in (model.obs_encoder, model.goal_encoder, model.goal_encoder_img):
+            for p in enc.parameters():
+                p.requires_grad = False
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    print(f"[params] trainable {n_train/1e6:.2f}M / total {n_total/1e6:.2f}M "
+          f"(freeze_backbone={freeze_backbone})")
 
     text_encoder, _ = clip.load(config["clip_type"])
     text_encoder.to(torch.float32).to(device)
 
-    optimizer = AdamW(model.parameters(), lr=float(config["lr"]))
-    scheduler = None
-    if config.get("scheduler") is not None and str(config["scheduler"]).lower() == "cosine":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
+    optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=float(config["lr"]))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
+    if config.get("warmup", True):
+        scheduler = GradualWarmupScheduler(
+            optimizer, multiplier=1, total_epoch=config.get("warmup_epochs", 2), after_scheduler=scheduler
+        )
 
     out = config.get("output_dir", "./logs_frodo_lan_ft")
     os.makedirs(out, exist_ok=True)
     print("Saving fine-tuned checkpoints to", out)
 
+    patience = int(config.get("early_stop_patience", 3))
+    best_loss = float("inf")
+    best_epoch = -1
+    since_improve = 0
+
     for epoch in range(config["epochs"]):
         train_lan_only_ft(
-            model=model,
-            text_encoder=text_encoder,
-            optimizer=optimizer,
-            dataloader_lan=train_loader,
-            transform=transform,
-            device=device,
-            project_folder=out,
-            epoch=epoch,
+            model=model, text_encoder=text_encoder, optimizer=optimizer,
+            dataloader_lan=train_loader, transform=transform, device=device,
+            project_folder=out, epoch=epoch,
             print_log_freq=config.get("print_log_freq", 20),
-            use_wandb=config["use_wandb"],
+            use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
         )
         if scheduler is not None:
             scheduler.step()
-        torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
-        if epoch % int(config.get("save_freq", 1)) == 0:
-            torch.save(model.state_dict(), os.path.join(out, f"{epoch}.pth"))
-        print(f"[save] epoch {epoch} -> {os.path.join(out, 'latest.pth')}")
 
-    print("FINISHED LAN-ONLY FINE-TUNE")
+        metrics = evaluate_lan_only_ft(model, base_model, text_encoder, test_loader, transform, device)
+        print(f"[eval] epoch {epoch}  test_action_loss={metrics['test_action_loss']:.4f}  "
+              f"test_obj_loss={metrics['test_obj_loss']:.4f}  "
+              f"base_divergence(image-goal)={metrics['base_divergence_imagegoal']:.4f}")
+        if config["use_wandb"]:
+            wandb.log({f"eval/{k}": v for k, v in metrics.items()})
+
+        torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
+
+        cur = metrics["test_action_loss"]
+        if cur < best_loss:
+            best_loss = cur
+            best_epoch = epoch
+            since_improve = 0
+            torch.save(model.state_dict(), os.path.join(out, "best.pth"))
+            print(f"[save] new best (test_action_loss={best_loss:.4f}) -> {out}/best.pth")
+        else:
+            since_improve += 1
+            print(f"[early-stop] no improvement {since_improve}/{patience} "
+                  f"(best={best_loss:.4f} @ epoch {best_epoch})")
+            if since_improve >= patience:
+                print(f"[early-stop] stopping at epoch {epoch}; best epoch was {best_epoch}")
+                break
+
+    print(f"FINISHED LAN-ONLY FINE-TUNE (best test_action_loss={best_loss:.4f} "
+          f"@ epoch {best_epoch}) -> {out}/best.pth")
 
 
 def main(config):

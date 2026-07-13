@@ -105,16 +105,40 @@ python train.py -c config/frodo_lan_ft.yaml
 
 ---
 
-## 4. 내부 동작 (파인튜닝 루프 요약)
+## 4. 파인튜닝 전략 — 보수적 부분 파인튜닝 (기본값)
 
-`train_lan_only_ft` (in `train_utils.py`):
-1. LeLaN 배치에서 obs(context+현재), 객체 crop, 현재 CLIP 이미지, 객체 pose, prompt, `nomad_traj_norm`을 받음.
-2. CLIP로 prompt → 텍스트 특징. 위성지도/맵 채널은 0으로 채움(언어 조건이므로).
-3. goal mask는 `{7=언어만, 8=언어+GPS}`에서 샘플 → 모델 forward.
-4. 손실: `action_loss`(모델 궤적 vs 데이터 `nomad_traj_norm`, 주 손실) + `obj_loss`(마지막 waypoint vs 객체 pose, 보조) + dist/smooth.
-5. AdamW로 업데이트. **teacher 호출 없음.**
+베이스 모델은 **대규모 멀티로봇 데이터**로 학습된 강한 prior를 갖는데 커스텀 데이터는 극소량이므로,
+전 파라미터를 흔드는 풀 파인튜닝은 **과적합 + catastrophic forgetting** 위험이 큽니다. 그래서 기본값은
+**부분 파인튜닝**입니다.
+
+**학습 루프** `train_lan_only_ft` / `main_lan_only_ft`:
+1. LeLaN 배치에서 obs(context+현재), 객체 crop, CLIP 이미지, 객체 pose, prompt, `nomad_traj_norm`을 받음.
+2. CLIP로 prompt → 텍스트 특징. 위성지도/맵 채널은 0(언어 조건이므로).
+3. goal mask `{7=언어만, 8=언어+GPS}` 샘플 → 모델 forward.
+4. 손실: `action_loss`(궤적 vs `nomad_traj_norm`, 주 손실) + `obj_loss`(마지막 waypoint vs 객체 pose) + dist/smooth.
+5. **teacher 호출 없음.** CLIP은 freeze.
+
+**`freeze_backbone: True`**(기본): 시각 인코더 `obs_encoder`/`goal_encoder`/`goal_encoder_img`를 freeze
+(BN 통계까지 eval로 고정). 학습되는 건 `decoder`·`film_model`·`compress_goal_enc_lan`·`local_goal`·
+`action_predictor`·`dist_predictor`뿐. 시작 시 `[params] trainable X.XM / total Y.YM` 로 확인.
+
+**낮은 LR + early stopping**: `lr=2e-5`, `epochs=12`, `warmup_epochs=2`, `early_stop_patience=3`.
+매 epoch 자동 분할된 **test(10%)에서 `test_action_loss`를 평가**하고, 개선이 없으면 조기 종료.
+`best.pth`(최저 test loss) + `latest.pth` 저장.
+
+### 기본 주행이 망가졌는지 확인하는 회귀 검사 ⭐
+다른 내비 데이터가 없어도, **우리 이미지에 이미지-goal 모달리티(mask 6)를 먹여 base 모델과 파인튜닝 모델의
+출력이 얼마나 벌어졌는지**를 매 epoch 측정합니다:
+```
+[eval] epoch k  test_action_loss=..  test_obj_loss=..  base_divergence(image-goal)=X.XXXX
+```
+- `base_divergence(image-goal)` ≈ 0 → 이미지-goal 기본 주행이 **보존됨**.
+- 이 값이 epoch가 갈수록 **크게 증가** → 언어 학습이 공유 디코더를 통해 기본 주행을 **망가뜨리는 중**.
+  이 경우 LR을 더 낮추거나, epoch를 줄이거나, `decoder`도 일부 freeze하세요.
+- 원본 `omnivla-edge.pth`(base)는 학습 내내 frozen 사본으로 메모리에 유지되어 비교 기준이 됩니다.
 
 순수 언어만 학습하려면 `train_utils.py`의 `random.choice([7, 8])`를 `[7]`로 바꾸세요.
+풀 파인튜닝을 원하면 config에 `freeze_backbone: False`.
 
 ---
 

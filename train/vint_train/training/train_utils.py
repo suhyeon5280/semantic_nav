@@ -9882,13 +9882,20 @@ def train_lan_only_ft(
     epoch,
     print_log_freq: int = 20,
     use_wandb: bool = False,
+    freeze_backbone: bool = False,
 ):
     """
     Language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on `frodo_lan` data.
     Uses the precomputed `nomad_traj_norm` from the dataset as the action label, so NO
     runtime NoMaD / ExAug teacher is required. Only the LeLaN stream is used.
+    If freeze_backbone, the (frozen) EfficientNet encoders are kept in eval() so their
+    BatchNorm running stats are NOT corrupted by the tiny fine-tune set.
     """
     model.train()
+    if freeze_backbone:
+        model.obs_encoder.eval()
+        model.goal_encoder.eval()
+        model.goal_encoder_img.eval()
     text_encoder.eval().to(device)
 
     total_loss_logger = Logger("total_loss", "train", window_size=print_log_freq)
@@ -10005,3 +10012,78 @@ def train_lan_only_ft(
                             "obj_loss": losses["obj_loss"].item(),
                         }
                     )
+
+
+@torch.no_grad()
+def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transform, device, max_batches=None):
+    """
+    Held-out evaluation for the language-only fine-tune.
+    Returns:
+      test_action_loss / test_obj_loss : language-goal (mask 7) quality on the test split.
+      base_divergence_imagegoal        : how far the fine-tuned model's IMAGE-GOAL (mask 6)
+                                         predictions drifted from the frozen base model on the
+                                         SAME inputs -> proxy for "did basic driving break".
+                                         ~0 = basic driving preserved; large = regression.
+    """
+    was_training = model.training
+    model.eval()
+    text_encoder.eval()
+    act_losses, obj_losses, base_divs = [], [], []
+    for i, data in enumerate(dataloader_lan):
+        if max_batches is not None and i >= max_batches:
+            break
+        (
+            obs_images_lan, goal_image_lan, cur_large_img_lan, goal_pos_lan, obj_inst_lan,
+            goal_pos_norm_lan, goal_image_full_lan, goal_image_full_8_lan, distance_lan,
+            action_mask_lan, nomad_traj_lan,
+        ) = data
+        Blan = obs_images_lan.shape[0]
+
+        obs_images_lan_list = torch.split(obs_images_lan, 3, dim=1)
+        obs_image_lan_map = obs_images_lan_list[-1].to(device)
+        obs_image_lan = torch.cat([transform(x).to(device) for x in obs_images_lan_list], dim=1)
+        cur_map = torch.zeros(Blan, 3, 96, 96)
+        goal_map = torch.zeros(Blan, 3, 96, 96)
+        map_images_lan = torch.cat(
+            (transform(cur_map).to(device), transform(goal_map).to(device), obs_image_lan_map), axis=1
+        )
+        goal_img = transform(goal_image_full_lan).to(device)
+        goal_img_future = transform(goal_image_full_8_lan).to(device)
+        cur_large_img = transform(cur_large_img_lan).to(device)
+
+        tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
+        feat_text_lan = text_encoder.encode_text(tokens)
+
+        goal_pos_lan = goal_pos_lan.to(device)
+        dis_obj = torch.sqrt(goal_pos_lan[:, 1:2] ** 2 + goal_pos_lan[:, 0:1] ** 2) + 1e-6
+        goal_pose_gps_lan = torch.cat(
+            (goal_pos_lan[:, 1:2], -goal_pos_lan[:, 0:1],
+             goal_pos_lan[:, 1:2] / dis_obj, -goal_pos_lan[:, 0:1] / dis_obj), axis=1
+        ).to(device)
+
+        # ---- language-goal quality (mask 7 = obs + language) ----
+        gm_lan = torch.full((Blan,), 7, dtype=torch.long, device=device)
+        a_pred, d_pred, _ = model(
+            obs_image_lan, goal_pose_gps_lan, map_images_lan, goal_img, gm_lan, feat_text_lan, cur_large_img
+        )
+        act_losses.append(F.mse_loss(a_pred, nomad_traj_lan.to(device)).item())
+        obj_losses.append(F.mse_loss(a_pred[:, -1, 0:2], goal_pos_lan / 0.125).item())
+
+        # ---- basic-driving regression: IMAGE goal (mask 6 = obs + image), base vs fine-tuned ----
+        if base_model is not None:
+            gm_img = torch.full((Blan,), 6, dtype=torch.long, device=device)
+            a_ft, _, _ = model(
+                obs_image_lan, goal_pose_gps_lan, map_images_lan, goal_img_future, gm_img, feat_text_lan, cur_large_img
+            )
+            a_base, _, _ = base_model(
+                obs_image_lan, goal_pose_gps_lan, map_images_lan, goal_img_future, gm_img, feat_text_lan, cur_large_img
+            )
+            base_divs.append(torch.mean(torch.norm(a_ft[:, :, 0:2] - a_base[:, :, 0:2], dim=-1)).item())
+
+    if was_training:
+        model.train()
+    return {
+        "test_action_loss": float(np.mean(act_losses)) if act_losses else float("nan"),
+        "test_obj_loss": float(np.mean(obj_losses)) if obj_losses else float("nan"),
+        "base_divergence_imagegoal": float(np.mean(base_divs)) if base_divs else float("nan"),
+    }

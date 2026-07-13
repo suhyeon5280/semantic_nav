@@ -47,17 +47,20 @@ datasets_lan:
     only_front: True
     waypoint_spacing: 1
 
-# --- training ---
+# --- training (conservative partial fine-tune for a tiny dataset) ---
 batch_size: 24
 eval_batch_size: 24
-epochs: 30
-lr: 1e-4
+epochs: 12
+lr: 2e-5                               # low LR: strong base prior + tiny data
 optimizer: adamw
 scheduler: "cosine"
+freeze_backbone: True                  # freeze obs/goal/goal_img EfficientNet encoders
+warmup: True
+warmup_epochs: 2
+early_stop_patience: 3                 # stop if test_action_loss doesn't improve for N epochs
 num_workers: 4
 gpu_ids: [0]
 seed: 0
 
 use_wandb: False                       # avoids the hardcoded wandb key
-save_freq: 1                           # save a numbered checkpoint every N epochs
 print_log_freq: 20                     # iterations
