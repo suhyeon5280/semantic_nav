@@ -1552,7 +1552,21 @@ class LeLaN_Dataset_multi(Dataset):
         pose_norm = np.asarray(obj["pose_median_norm"]).reshape(-1).astype(np.float32)
 
         # precomputed NoMaD trajectory (8,4): (x=fwd, y=left, cos, sin)
-        nomad_traj = np.asarray(obj["nomad_traj_norm"], dtype=np.float32)
+        nomad_traj = np.asarray(obj["nomad_traj_norm"], dtype=np.float32).copy()
+
+        # horizontal-flip augmentation (matches public OmniVLA lelan_dataset.py):
+        # mirror images left<->right, negate lateral(left) of pose, and flip the
+        # trajectory's y (col1) and sin (col3). forward(col0) and cos(col2) unchanged.
+        if random.random() > 0.5:
+            image_obs = torch.flip(image_obs, [2])
+            image_crop = torch.flip(image_crop, [2])
+            cur_image_large = torch.flip(cur_image_large, [2])
+            goal_image_full = torch.flip(goal_image_full, [2])
+            goal_image_full_8 = torch.flip(goal_image_full_8, [2])
+            ob_pose = np.array((ob_pose[0], -ob_pose[1]), dtype=np.float32)
+            pose_norm = np.array((pose_norm[0], -pose_norm[1]), dtype=np.float32)
+            nomad_traj[:, 1] = -nomad_traj[:, 1]
+            nomad_traj[:, 3] = -nomad_traj[:, 3]
 
         return (
             torch.as_tensor(image_obs, dtype=torch.float32),

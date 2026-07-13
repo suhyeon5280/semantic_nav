@@ -118,6 +118,11 @@ python train.py -c config/frodo_lan_ft.yaml
 4. 손실: `action_loss`(궤적 vs `nomad_traj_norm`, 주 손실) + `obj_loss`(마지막 waypoint vs 객체 pose) + dist/smooth.
 5. **teacher 호출 없음.** CLIP은 freeze.
 
+**증강**: 공개 OmniVLA(`prismatic/vla/datasets/lelan_dataset.py`)와 동일하게 좌우 반전(flip) 증강을
+적용합니다 — 이미지 좌우 미러 + 궤적 `nomad_traj_norm`의 y(col1)·sin(col3) 부호 반전 + 객체 pose의
+좌(left) 부호 반전 (forward·cos는 유지). 소량 데이터의 일반화에 도움.
+> NoMaD 궤적을 **학습 중 pickle에서 그대로 불러오는(런타임 NoMaD 실행 없음)** 방식도 공개 OmniVLA와 동일함을 코드 대조로 확인했습니다.
+
 **`freeze_backbone: True`**(기본): 시각 인코더 `obs_encoder`/`goal_encoder`/`goal_encoder_img`를 freeze
 (BN 통계까지 eval로 고정). 학습되는 건 `decoder`·`film_model`·`compress_goal_enc_lan`·`local_goal`·
 `action_predictor`·`dist_predictor`뿐. 시작 시 `[params] trainable X.XM / total Y.YM` 로 확인.
