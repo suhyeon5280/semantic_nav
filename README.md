@@ -52,19 +52,34 @@ LeLaN의 행동 라벨을 **teacher 모델(ExAug/MBRA, NoMaD)로 런타임 생�
 
 ## 2. 데이터 준비
 
+데이터를 아무 위치(`<DATA_ROOT>`)에나 아래 구조로 저장하면 됩니다. `<DATA_ROOT>`는 당신이 정합니다
+(예: `/home/shy/data`). 4개의 하위 폴더가 config의 4개 경로와 1:1로 매핑됩니다.
+
 ```
 <DATA_ROOT>/frodo_lan/
-├── image/00000000.jpg, 00000001.jpg, …   # 224×224 RGB, 8자리 zero-pad, 0부터 연속(시간순)
-├── pickle/00000000.pkl, 00000001.pkl, …  # image와 1:1, 같은 인덱스
-├── train/     # 빈 폴더(쓰기 가능) — 학습 시 LMDB 캐시가 여기 생성됨
-└── test/      # 빈 폴더(쓰기 가능)
+├── image/     00000000.jpg, 00000001.jpg, …   # 224×224 RGB, 8자리 zero-pad, 0부터 연속(시간순)
+├── pickle/    00000000.pkl, 00000001.pkl, …   # image와 1:1, 같은 인덱스
+├── train/     (빈 폴더, 쓰기 가능)              # 학습 시 LMDB 캐시가 여기 자동 생성됨
+└── test/      (빈 폴더, 쓰기 가능)              # 마찬가지
 ```
 
+**폴더 ↔ config 키 매핑** (`config/frodo_lan_ft.yaml`의 `datasets_lan.frodo_lan`):
+
+| config 키 | 가리켜야 할 폴더 | 내용 |
+|---|---|---|
+| `image`  | `<DATA_ROOT>/frodo_lan/image/`  | 224×224 jpg들 |
+| `pickle` | `<DATA_ROOT>/frodo_lan/pickle/` | 프레임별 pkl들 |
+| `train`  | `<DATA_ROOT>/frodo_lan/train/`  | 빈 폴더 (train LMDB 캐시 생성 위치) |
+| `test`   | `<DATA_ROOT>/frodo_lan/test/`   | 빈 폴더 (test LMDB 캐시 생성 위치) |
+
+> 네 경로 모두 **절대경로 + 끝에 `/` 필수**. `image`와 `pickle`은 실제 데이터가 든 폴더, `train`/`test`는
+> 그냥 비어 있는 쓰기 가능 폴더면 됩니다(직접 만들어 두세요: `mkdir -p <DATA_ROOT>/frodo_lan/{train,test}`).
+
 **규칙**
-- 이미지는 **반드시 224×224**. 로더가 리사이즈하지 않고 bbox/crop이 224 기준이기 때문(코드에서 안전하게 224로 강제하긴 함).
+- 이미지는 **반드시 224×224**. 로더가 리사이즈하지 않고 bbox/crop이 224 기준(코드에서 안전하게 224로 강제하긴 함).
 - 프레임은 **시간순**(과거 프레임을 context로, 미래 프레임을 goal로 참조).
 - 객체 없는 프레임도 `pickle.dump([], f)`로 pkl 저장(파일 크기 0이면 스킵됨).
-- train/test 폴더는 **비워 둠**. 분할은 로더가 인덱스 비율 **90/10**으로 자동 수행.
+- train/test 폴더는 **비워 둠**. train/test **분할은 로더가 인덱스 비율 90/10으로 자동** 수행(당신이 나눌 필요 없음).
 
 **pickle 형식** (프레임당 객체 리스트, 각 원소 dict):
 ```python
@@ -81,27 +96,82 @@ LeLaN의 행동 라벨을 **teacher 모델(ExAug/MBRA, NoMaD)로 런타임 생�
 
 ## 3. 실행 방법
 
+### 3-1. 환경
 ```bash
-# 1) 환경 (레포 루트)
+# 레포 루트에서
 conda env create -f environment_mbra.yml
 conda activate <env>
-# 누락 시: pip install efficientnet_pytorch openai-clip lmdb diffusers warmup_scheduler prettytable utm
+# 누락 패키지 있으면: pip install efficientnet_pytorch openai-clip lmdb diffusers warmup_scheduler prettytable utm
+```
 
-# 2) 체크포인트: omnivla-edge.pth 를 train/ 에 배치 (HF: NHirose/omnivla-edge)
+### 3-2. 체크포인트
+`omnivla-edge.pth`(HF: `NHirose/omnivla-edge`)를 `train/omnivla-edge.pth`에 둡니다. config의
+`load_edge_ckpt: ./omnivla-edge.pth`가 `train/` 기준 상대경로이므로, 다른 곳에 두면 그 경로로 바꾸세요.
 
-# 3) config 경로 수정: train/config/frodo_lan_ft.yaml 의 datasets_lan.frodo_lan 4개 경로
-#    (train/test/image/pickle) 를 실제 <DATA_ROOT> 로 (끝에 '/' 필수)
+### 3-3. ⭐ 데이터 경로 수정 (여기만 고치면 됩니다)
+`train/config/frodo_lan_ft.yaml`을 열면 이 블록이 있습니다:
 
-# 4) 실행
+```yaml
+datasets_lan:
+  frodo_lan:
+    # >>> EDIT THESE FOUR PATHS on the machine that has the data (keep trailing '/') <<<
+    train:  /PATH/TO/DATA_ROOT/frodo_lan/train/
+    test:   /PATH/TO/DATA_ROOT/frodo_lan/test/
+    image:  /PATH/TO/DATA_ROOT/frodo_lan/image/
+    pickle: /PATH/TO/DATA_ROOT/frodo_lan/pickle/
+```
+
+`/PATH/TO/DATA_ROOT`를 **당신의 실제 `<DATA_ROOT>`로 4곳 모두** 바꾸면 됩니다. 예를 들어 데이터를
+`/home/shy/data/frodo_lan/...`에 뒀다면:
+
+```yaml
+datasets_lan:
+  frodo_lan:
+    train:  /home/shy/data/frodo_lan/train/
+    test:   /home/shy/data/frodo_lan/test/
+    image:  /home/shy/data/frodo_lan/image/
+    pickle: /home/shy/data/frodo_lan/pickle/
+```
+
+> 주의: **끝에 `/` 반드시** 포함. 이 4줄 + (필요 시) `load_edge_ckpt` 외에는 건드릴 필요 없습니다.
+
+### 3-4. 실행
+```bash
 cd train
 python train.py -c config/frodo_lan_ft.yaml
 ```
 
 **정상 동작 신호**
 - 시작 로그: `[ckpt] loaded. missing=0 unexpected=0` → `omnivla-edge.pth` 정상 로드.
+- `[params] trainable X.XM / total Y.YM` → 백본 freeze로 학습 파라미터가 줄어든 것 확인.
 - 배치 로그: `total=… action=… obj=…` → `action` loss가 감소하면 학습 중.
-- 저장: `train/logs_frodo_lan_ft/latest.pth`(에폭마다) + `0.pth, 1.pth, …`.
-- 결과 `latest.pth`는 원본과 동일 구조라 공개 레포 `inference/run_omnivla_edge.py`에 그대로 넣어 추론 가능.
+- epoch마다: `[eval] ... test_action_loss=.. base_divergence(image-goal)=..`
+- 저장: `train/logs_frodo_lan_ft/best.pth`(최적) + `latest.pth`.
+- 결과 체크포인트는 원본과 동일 구조라 공개 레포 `inference/run_omnivla_edge.py`에 그대로 넣어 추론 가능.
+
+### 3-5. 🔥 스모크 테스트 (본 학습 전에 먼저 하세요)
+이 코드는 **end-to-end로 아직 검증되지 않았습니다.** 데이터를 조금(예: **에피소드 2~3개**)만 준비해
+먼저 **파이프라인이 도는지** 확인하는 걸 강력 권장합니다. 목적은 "성능"이 아니라 **버그 잡기**입니다.
+
+스모크 테스트용으로 config를 잠깐 이렇게:
+```yaml
+batch_size: 8       # 데이터가 적으면 24 -> 8 (drop_last=True라 배치가 0개 되는 것 방지)
+epochs: 2           # 2~3이면 충분
+freeze_backbone: True
+```
+그리고 **확인할 것만** 봅니다:
+- `[ckpt] loaded. missing=0 unexpected=0` 나오나
+- 첫 배치에서 크래시 없이 `total=/action=/obj=` loss가 찍히나
+- `[eval]`·체크포인트 저장까지 도나
+
+⚠️ 소량 데이터라 `test_action_loss`·`base_divergence` **수치는 노이즈**입니다 — "돌아가는지"만 보고,
+**"좋아졌는지"는 판단하지 마세요.** 파이프라인이 정상이면, 데이터가 충분히 모인 뒤 원래 하이퍼파라미터로
+본 학습을 돌리면 됩니다.
+
+> 참고 — 에피소드 경계: 현재 `frodo_lan` 로더는 데이터를 하나의 연속 시퀀스로 보고 context를 인덱스
+> 인접(`iv-1..iv-5`)으로 가져옵니다. 여러 에피소드를 `0..N`으로 이어붙이면 **경계에서 context가 이전
+> 에피소드를 물어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별 분리/경계 처리가
+> 필요할 수 있습니다(§6 참고).
 
 ---
 
@@ -195,7 +265,12 @@ heading_cos           0.xxxx      0.xxxx      +0.xxxx   (higher) <-- improved
   `action_pred` vs `nomad_traj_norm`을 시각적으로 대조해 확인 권장.
 - **obj_loss 스케일**: 보조항(`obj_loss`, 가중치 0.05)에서 `metric_waypoint_spacing=0.125`(코드) vs 데이터 `0.12`로 ~4% 차이.
   주 손실(`action_loss`)엔 영향 없음.
-- 데이터가 작으면(예: 수백 프레임) 과적합 주의 — 스모크 테스트/소규모 파인튜닝용.
+- 데이터가 작으면(예: 수백 프레임) 과적합 주의 — 먼저 §3-5 스모크 테스트로 검증할 것.
+- **에피소드 경계**: `frodo_lan` 로더는 데이터를 하나의 연속 시퀀스로 보고 context를 인덱스 인접
+  (`iv-1..iv-5`)으로 가져옵니다. 여러 에피소드를 `image/00000000.jpg …`로 이어붙이면 **경계 프레임에서
+  context가 이전 에피소드에서 넘어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별로
+  나눠 로딩하거나 경계에서 context를 클램프하도록 `_load_split_index`/`_getitem_frodo_lan`을 보강해야
+  라벨 품질이 정확해집니다.
 
 ---
 
