@@ -54,8 +54,8 @@ try:
     from vint_train.data.vint_dataset import ViNT_Dataset, ViNT_Dataset_fix, ViNT_Dataset_gps, ViNT_ExAug_Dataset
     from vint_train.data.vint_hf_dataset import ViNTLeRobotDataset, ViNTLeRobotDataset_annotate, ViNTDataset_annotate_10k, ViNTLeRobotDataset_IL2, ViNTLeRobotDataset_IL2_gps, ViNTDataset_IL2_gps_10k, ViNTDataset_10k, ViNTDataset_IL2_10k, ViNTLeRobotDataset_IL2_gps_map, ViNTLeRobotDataset_IL2_gps_map_crop, ViNTLeRobotDataset_IL2_gps_map2_crop, ViNTLeRobotDataset_IL2_gps_map_crop_test, EpisodeSampler_IL, EpisodeSampler_annotate, EpisodeSampler_IL_10k, EpisodeSampler_annotate_10k, ViNTDataset_IL2_gps_crop_10k, ViNTLeRobotDataset_IL2_gps_map2_crop_shadow
     from vint_train.data.bdd_dataset import BDD_Dataset_multi
-except Exception as _opt_e:
-    print(f"[lan_only] optional model/dataset imports skipped ({type(_opt_e).__name__}: {_opt_e})")
+except Exception:
+    pass  # optional models/datasets (full multi-modal training); not needed for lan_only_ft
 
 from vint_train.training.train_eval_loop import (
     train_eval_loop,
