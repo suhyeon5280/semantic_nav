@@ -335,6 +335,25 @@ python visualize_traj.py --episode episode_0037 --n 6
 결과 PNG로 **파인튜닝이 GT 궤적을 잘 따라가는지 / 궤적이 객체 방향을 향하는지**를 바로 확인할 수 있습니다.
 (생성 PNG `eval_*.png`는 `.gitignore` 처리됨.)
 
+### 임의 이미지로 추론 — `infer.py`
+**라벨/데이터셋 형식 없이** 아무 이미지 + 언어 prompt만으로 궤적을 예측합니다 (다른 데이터로 inference 확인용).
+언어 모달리티(goal mask 7)에선 모델이 **관측 이미지 + 텍스트만** 쓰므로 GPS/지도/이미지-goal은 dummy(0)로 넣습니다.
+
+```bash
+cd train
+# 현재 이미지 1장 + 지시
+python infer.py --prompt "go to the metal gate" --images cur.jpg
+
+# context 시퀀스 (오래된 -> 최신, 마지막이 현재 프레임)
+python infer.py --prompt "turn toward the white wall" --images t-2.jpg t-1.jpg t.jpg
+
+# 다른 체크포인트 / 출력 파일
+python infer.py --prompt "..." --images cur.jpg --ckpt logs_frodo_lan_ft/best.pth --out out.png
+```
+→ 콘솔에 8-스텝 waypoint(전방·좌 m) 출력 + `infer_out.png`(장면 | 예측 궤적) 저장. 한 번의 forward(결정론적).
+> 추론 자체엔 `nomad_traj` 라벨이 필요 없습니다(라벨은 평가/비교용). 그래서 어떤 데이터의 이미지든 바로 넣어볼 수 있습니다.
+> 단, 모델은 학습 데이터의 prompt 분포(객체 묘사)에 맞춰져 있어, 전혀 다른 표현/도메인엔 반응이 약할 수 있습니다.
+
 ## 6. 알려진 문제 / 주의점
 
 ### 이 레포 전반 (원본 정리 전 코드)

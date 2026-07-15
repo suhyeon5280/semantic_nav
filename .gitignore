@@ -14,3 +14,4 @@ omnivla_dataset/_cache/
 omnivla_dataset/
 # generated visualization PNGs
 train/eval_*.png
+train/infer_*.png
