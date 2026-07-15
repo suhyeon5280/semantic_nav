@@ -1,5 +1,7 @@
 # =====================================================================
 # Fine-tune OmniVLA-edge (IL_gps_map_mask3_lan2) on custom LeLaN-format data.
+# >>> SMALL-DATASET preset (conservative): freeze vision backbone, low LR, early stop.
+#     For a LARGE dataset use config/frodo_lan_ft_full.yaml instead. <<<
 # LANGUAGE-ONLY path: only the `frodo_lan` LeLaN stream is used.
 #   - NO frodobot / gnm / bdd datasets required
 #   - NO NoMaD / ExAug teacher checkpoints required

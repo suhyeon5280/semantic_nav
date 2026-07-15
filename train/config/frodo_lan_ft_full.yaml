@@ -1,0 +1,72 @@
+# =====================================================================
+# Fine-tune OmniVLA-edge (IL_gps_map_mask3_lan2) on custom LeLaN-format data.
+# >>> LARGE-DATASET preset: UNFREEZE the vision backbone, higher LR, more epochs.
+#     For a small dataset (a few episodes) use config/frodo_lan_ft.yaml instead. <<<
+# LANGUAGE-ONLY path (same pipeline as frodo_lan_ft.yaml):
+#   - NO frodobot / gnm / bdd datasets, NO NoMaD / ExAug teacher
+#   - action labels come from the dataset's `nomad_traj_norm`
+#   - saves to a SEPARATE output_dir so it won't overwrite the small-data run
+# Run:  python train.py -c config/frodo_lan_ft_full.yaml
+# =====================================================================
+
+project_name: frodobot-gnm-lelan
+run_name: frodo_lan_ft_full
+lan_only_ft: True
+
+# --- checkpoint to fine-tune + output dir (separate from the small-data preset) ---
+load_edge_ckpt: ./omnivla-edge.pth
+output_dir: ./logs_frodo_lan_ft_full
+
+# --- model params (MUST match omnivla-edge.pth) ---
+model_type: il_exaug_gps_map2_lan
+context_size: 5
+len_traj_pred: 8
+learn_angle: True
+obs_encoder: efficientnet-b0
+obs_encoding_size: 1024
+encoding_size: 256
+late_fusion: False
+mha_num_attention_heads: 4
+mha_num_attention_layers: 4
+mha_ff_dim_factor: 4
+clip_type: "ViT-B/32"
+
+# --- data ---
+image_size: [96, 96]
+image_size_clip: [224, 224]
+normalize: True
+context_type: temporal
+
+# Prompt filter (same as small-data preset). Set to [] to disable.
+prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
+                   ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
+                   path, pathway, drop, mud, cobblestone]
+
+datasets_lan:
+  frodo_lan:
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/train/
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/test/
+    backside: False
+    aug_seq: False
+    only_front: True
+    waypoint_spacing: 1
+
+# --- training (LARGE data: train the whole model, higher LR, longer) ---
+batch_size: 24                         # raise if VRAM allows; lower to 8/12 on OOM
+eval_batch_size: 24
+epochs: 40
+lr: 1e-4                               # higher LR: enough data to train the full model
+optimizer: adamw
+scheduler: "cosine"
+freeze_backbone: False                 # UNFREEZE vision encoders (needs plenty of data)
+warmup: True
+warmup_epochs: 3
+early_stop_patience: 5                 # allow more patience with more data
+num_workers: 8
+gpu_ids: [0]
+seed: 0
+
+use_wandb: False
+print_log_freq: 50

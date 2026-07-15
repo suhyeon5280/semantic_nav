@@ -211,6 +211,28 @@ freeze_backbone: True
 > 에피소드를 물어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별 분리/경계 처리가
 > 필요할 수 있습니다(§6 참고).
 
+### 3-6. 데이터 규모별 프리셋 (소량 vs 대용량)
+데이터 양에 따라 두 개의 config를 준비해뒀습니다. **데이터만 `omnivla_dataset/`에 더 넣고 config만 고르면** 됩니다.
+
+| | `config/frodo_lan_ft.yaml` (소량, 기본) | `config/frodo_lan_ft_full.yaml` (대용량) |
+|---|---|---|
+| `freeze_backbone` | **True** (시각 인코더 고정) | **False** (전체 학습) |
+| `lr` | 2e-5 | 1e-4 |
+| `epochs` | 12 | 40 |
+| `early_stop_patience` | 3 | 5 |
+| `output_dir` | `./logs_frodo_lan_ft` | `./logs_frodo_lan_ft_full` |
+| prompt 필터 | 동일 (ON) | 동일 (ON) |
+
+- **소량(에피소드 몇 개)** → `frodo_lan_ft.yaml` (과적합 방지 우선).
+- **데이터 충분** → `frodo_lan_ft_full.yaml` (백본까지 당신 도메인에 맞춰 학습).
+- 데이터 경로(`datasets_lan`)는 두 파일에서 동일하게 유지하세요.
+
+### 체크포인트 — 기존 파일 지울 필요 없음 ✅
+- 재학습은 **항상 원본 `omnivla-edge.pth`(base)에서 시작**합니다(이전 파인튜닝 결과에서 이어받지 않음). 그래서 이전 실행의 남은 파일이 새 학습을 **오염시키지 않습니다** — 지우지 않아도 됩니다.
+- 단, 같은 config를 다시 돌리면 그 `output_dir`의 **`best.pth`/`latest.pth`는 덮어쓰기** 됩니다. 이전 결과를 남기려면 그 폴더를 백업하거나 `output_dir`를 바꾸세요.
+- 두 프리셋은 `output_dir`가 달라서 **서로 덮어쓰지 않습니다**(소량↔대용량 결과 공존 가능).
+- 원본 `omnivla-edge.pth`는 어느 경우에도 **읽기 전용**, 절대 안 바뀝니다.
+
 ---
 
 ## 4. 파인튜닝 전략 — 보수적 부분 파인튜닝 (기본값)
