@@ -10,3 +10,5 @@ train/vint_train/data/sampler/
 train/logs_frodo_lan_ft/
 # frodo_lan LMDB cache (rebuilt from data)
 omnivla_dataset/_cache/
+# Raw dataset (do not commit ~32MB of images/pkl)
+omnivla_dataset/
