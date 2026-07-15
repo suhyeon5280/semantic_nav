@@ -106,6 +106,15 @@ def main_lan_only_ft(config, device, transform):
     print(f"[prompt-filter] blocklist ({len(blocklist)} words) "
           f"{'ENABLED' if blocklist else 'disabled'}")
 
+    # train/test split strategy (read by LeLaN_Dataset_multi._load_split_index):
+    #   False -> 90/10 by frame index (small data: keeps almost all frames for training)
+    #   True  -> hold out whole episodes as test (large data: trustworthy, no leakage)
+    LeLaN_Dataset_multi.split_by_episode = bool(config.get("split_by_episode", False))
+    print(f"[split] {'episode-level (hold out whole episodes)' if LeLaN_Dataset_multi.split_by_episode else 'index-level 90/10'}")
+
+    os.makedirs(dc["train"], exist_ok=True)   # LMDB cache dirs (create if missing)
+    os.makedirs(dc["test"], exist_ok=True)
+
     def make_ds(split):
         ds = LeLaN_Dataset_multi(
             data_split_folder=dc[split],

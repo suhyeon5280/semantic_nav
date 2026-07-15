@@ -119,9 +119,14 @@ class LeLaN_Dataset(Dataset):
         """
         Build a cache of images for faster loading using LMDB
         """
+        _tag = ""
+        if self.dataset_name == "frodo_lan":
+            # encode split strategy + frame count so the cache auto-rebuilds when the split
+            # strategy or the dataset (e.g. added episodes) changes -> avoids stale caches.
+            _tag = ("_ep" if getattr(self, "split_by_episode", False) else "_idx") + f"_{len(self.image_path)}"
         cache_filename = os.path.join(
             self.data_split_folder,
-            f"dataset_{self.dataset_name}_{self.data_split_type}.lmdb",
+            f"dataset_{self.dataset_name}_{self.data_split_type}{_tag}.lmdb",
         )
 
         self._get_augdata()
@@ -167,27 +172,42 @@ class LeLaN_Dataset(Dataset):
                 d for d in os.listdir(root_pk)
                 if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
             )
-            all_img, all_pk, all_ep = [], [], []
-            for ep in episodes:
-                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
-                im_dir = os.path.join(root_im, ep, "image")
-                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
-                for st in stems:
-                    ip = os.path.join(im_dir, st + ".jpg")
-                    pp = os.path.join(pk_dir, st + ".pkl")
-                    if os.path.exists(ip):
-                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
-            n = len(all_img)
-            thres = int(n * 0.9)
-            if self.data_split_type == "train":
-                sel = list(range(0, thres))
-                print("frodo_lan train frames", len(sel), "| episodes", episodes)
+
+            def _gather(eps):
+                imgs, pks, eids = [], [], []
+                for ep in eps:
+                    pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                    im_dir = os.path.join(root_im, ep, "image")
+                    stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                    for st in stems:
+                        ip = os.path.join(im_dir, st + ".jpg")
+                        pp = os.path.join(pk_dir, st + ".pkl")
+                        if os.path.exists(ip):
+                            imgs.append(ip); pks.append(pp); eids.append(ep)
+                return imgs, pks, eids
+
+            if getattr(self, "split_by_episode", False):
+                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
+                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                test_eps = set(episodes[-n_test_ep:])
+                sel_eps = ([e for e in episodes if e not in test_eps]
+                           if self.data_split_type == "train"
+                           else [e for e in episodes if e in test_eps])
+                self.image_path, self.pickle_path, ep_sel = _gather(sel_eps)
+                print(f"frodo_lan {self.data_split_type} (episode-split): "
+                      f"{len(self.image_path)} frames from episodes {sel_eps}")
             else:
-                sel = list(range(thres, n))
-                print("frodo_lan test frames", len(sel))
-            self.image_path = [all_img[i] for i in sel]
-            self.pickle_path = [all_pk[i] for i in sel]
-            ep_sel = [all_ep[i] for i in sel]
+                # SMALL-data split: 90/10 by global frame index (keeps almost all data for training)
+                all_img, all_pk, all_ep = _gather(episodes)
+                n = len(all_img)
+                thres = int(n * 0.9)
+                sel = (list(range(0, thres)) if self.data_split_type == "train"
+                       else list(range(thres, n)))
+                self.image_path = [all_img[i] for i in sel]
+                self.pickle_path = [all_pk[i] for i in sel]
+                ep_sel = [all_ep[i] for i in sel]
+                print(f"frodo_lan {self.data_split_type} (index-split): {len(sel)} frames "
+                      f"| episodes {episodes}")
             # per-position inclusive episode bounds within the selected list
             self.ep_lo = [0] * len(ep_sel)
             self.ep_hi = [0] * len(ep_sel)
@@ -602,9 +622,14 @@ class LeLaN_Dataset_multi(Dataset):
         """
         Build a cache of images for faster loading using LMDB
         """
+        _tag = ""
+        if self.dataset_name == "frodo_lan":
+            # encode split strategy + frame count so the cache auto-rebuilds when the split
+            # strategy or the dataset (e.g. added episodes) changes -> avoids stale caches.
+            _tag = ("_ep" if getattr(self, "split_by_episode", False) else "_idx") + f"_{len(self.image_path)}"
         cache_filename = os.path.join(
             self.data_split_folder,
-            f"dataset_{self.dataset_name}_{self.data_split_type}.lmdb",
+            f"dataset_{self.dataset_name}_{self.data_split_type}{_tag}.lmdb",
         )
 
         self._get_augdata()
@@ -650,27 +675,42 @@ class LeLaN_Dataset_multi(Dataset):
                 d for d in os.listdir(root_pk)
                 if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
             )
-            all_img, all_pk, all_ep = [], [], []
-            for ep in episodes:
-                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
-                im_dir = os.path.join(root_im, ep, "image")
-                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
-                for st in stems:
-                    ip = os.path.join(im_dir, st + ".jpg")
-                    pp = os.path.join(pk_dir, st + ".pkl")
-                    if os.path.exists(ip):
-                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
-            n = len(all_img)
-            thres = int(n * 0.9)
-            if self.data_split_type == "train":
-                sel = list(range(0, thres))
-                print("frodo_lan train frames", len(sel), "| episodes", episodes)
+
+            def _gather(eps):
+                imgs, pks, eids = [], [], []
+                for ep in eps:
+                    pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                    im_dir = os.path.join(root_im, ep, "image")
+                    stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                    for st in stems:
+                        ip = os.path.join(im_dir, st + ".jpg")
+                        pp = os.path.join(pk_dir, st + ".pkl")
+                        if os.path.exists(ip):
+                            imgs.append(ip); pks.append(pp); eids.append(ep)
+                return imgs, pks, eids
+
+            if getattr(self, "split_by_episode", False):
+                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
+                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                test_eps = set(episodes[-n_test_ep:])
+                sel_eps = ([e for e in episodes if e not in test_eps]
+                           if self.data_split_type == "train"
+                           else [e for e in episodes if e in test_eps])
+                self.image_path, self.pickle_path, ep_sel = _gather(sel_eps)
+                print(f"frodo_lan {self.data_split_type} (episode-split): "
+                      f"{len(self.image_path)} frames from episodes {sel_eps}")
             else:
-                sel = list(range(thres, n))
-                print("frodo_lan test frames", len(sel))
-            self.image_path = [all_img[i] for i in sel]
-            self.pickle_path = [all_pk[i] for i in sel]
-            ep_sel = [all_ep[i] for i in sel]
+                # SMALL-data split: 90/10 by global frame index (keeps almost all data for training)
+                all_img, all_pk, all_ep = _gather(episodes)
+                n = len(all_img)
+                thres = int(n * 0.9)
+                sel = (list(range(0, thres)) if self.data_split_type == "train"
+                       else list(range(thres, n)))
+                self.image_path = [all_img[i] for i in sel]
+                self.pickle_path = [all_pk[i] for i in sel]
+                ep_sel = [all_ep[i] for i in sel]
+                print(f"frodo_lan {self.data_split_type} (index-split): {len(sel)} frames "
+                      f"| episodes {episodes}")
             # per-position inclusive episode bounds within the selected list
             self.ep_lo = [0] * len(ep_sel)
             self.ep_hi = [0] * len(ep_sel)
@@ -1114,9 +1154,14 @@ class LeLaN_Dataset_multi(Dataset):
         """
         Build a cache of images for faster loading using LMDB
         """
+        _tag = ""
+        if self.dataset_name == "frodo_lan":
+            # encode split strategy + frame count so the cache auto-rebuilds when the split
+            # strategy or the dataset (e.g. added episodes) changes -> avoids stale caches.
+            _tag = ("_ep" if getattr(self, "split_by_episode", False) else "_idx") + f"_{len(self.image_path)}"
         cache_filename = os.path.join(
             self.data_split_folder,
-            f"dataset_{self.dataset_name}_{self.data_split_type}.lmdb",
+            f"dataset_{self.dataset_name}_{self.data_split_type}{_tag}.lmdb",
         )
 
         self._get_augdata()
@@ -1162,27 +1207,42 @@ class LeLaN_Dataset_multi(Dataset):
                 d for d in os.listdir(root_pk)
                 if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
             )
-            all_img, all_pk, all_ep = [], [], []
-            for ep in episodes:
-                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
-                im_dir = os.path.join(root_im, ep, "image")
-                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
-                for st in stems:
-                    ip = os.path.join(im_dir, st + ".jpg")
-                    pp = os.path.join(pk_dir, st + ".pkl")
-                    if os.path.exists(ip):
-                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
-            n = len(all_img)
-            thres = int(n * 0.9)
-            if self.data_split_type == "train":
-                sel = list(range(0, thres))
-                print("frodo_lan train frames", len(sel), "| episodes", episodes)
+
+            def _gather(eps):
+                imgs, pks, eids = [], [], []
+                for ep in eps:
+                    pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                    im_dir = os.path.join(root_im, ep, "image")
+                    stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                    for st in stems:
+                        ip = os.path.join(im_dir, st + ".jpg")
+                        pp = os.path.join(pk_dir, st + ".pkl")
+                        if os.path.exists(ip):
+                            imgs.append(ip); pks.append(pp); eids.append(ep)
+                return imgs, pks, eids
+
+            if getattr(self, "split_by_episode", False):
+                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
+                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                test_eps = set(episodes[-n_test_ep:])
+                sel_eps = ([e for e in episodes if e not in test_eps]
+                           if self.data_split_type == "train"
+                           else [e for e in episodes if e in test_eps])
+                self.image_path, self.pickle_path, ep_sel = _gather(sel_eps)
+                print(f"frodo_lan {self.data_split_type} (episode-split): "
+                      f"{len(self.image_path)} frames from episodes {sel_eps}")
             else:
-                sel = list(range(thres, n))
-                print("frodo_lan test frames", len(sel))
-            self.image_path = [all_img[i] for i in sel]
-            self.pickle_path = [all_pk[i] for i in sel]
-            ep_sel = [all_ep[i] for i in sel]
+                # SMALL-data split: 90/10 by global frame index (keeps almost all data for training)
+                all_img, all_pk, all_ep = _gather(episodes)
+                n = len(all_img)
+                thres = int(n * 0.9)
+                sel = (list(range(0, thres)) if self.data_split_type == "train"
+                       else list(range(thres, n)))
+                self.image_path = [all_img[i] for i in sel]
+                self.pickle_path = [all_pk[i] for i in sel]
+                ep_sel = [all_ep[i] for i in sel]
+                print(f"frodo_lan {self.data_split_type} (index-split): {len(sel)} frames "
+                      f"| episodes {episodes}")
             # per-position inclusive episode bounds within the selected list
             self.ep_lo = [0] * len(ep_sel)
             self.ep_hi = [0] * len(ep_sel)

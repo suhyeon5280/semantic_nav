@@ -220,8 +220,11 @@ freeze_backbone: True
 | `lr` | 2e-5 | 1e-4 |
 | `epochs` | 12 | 40 |
 | `early_stop_patience` | 3 | 5 |
+| `split_by_episode` | **False** (인덱스 90/10) | **True** (에피소드 통째 held-out) |
 | `output_dir` | `./logs_frodo_lan_ft` | `./logs_frodo_lan_ft_full` |
 | prompt 필터 | 동일 (ON) | 동일 (ON) |
+
+- **`split_by_episode`**: 소량일 땐 False가 유리 — 에피소드 단위로 빼면 (3개 중 1개=33%처럼) 학습 데이터가 크게 줄기 때문. 대용량일 땐 True로 두면 test 에피소드가 train과 완전히 분리돼 **지표 신뢰도**가 높아짐(train/test 누수 없음). 캐시는 전략·프레임수별로 따로 생성되어 전환 시 자동 재빌드됩니다.
 
 - **소량(에피소드 몇 개)** → `frodo_lan_ft.yaml` (과적합 방지 우선).
 - **데이터 충분** → `frodo_lan_ft_full.yaml` (백본까지 당신 도메인에 맞춰 학습).
@@ -329,11 +332,9 @@ heading_cos           0.xxxx      0.xxxx      +0.xxxx   (higher) <-- improved
 - **obj_loss 스케일**: 보조항(`obj_loss`, 가중치 0.05)에서 `metric_waypoint_spacing=0.125`(코드) vs 데이터 `0.12`로 ~4% 차이.
   주 손실(`action_loss`)엔 영향 없음.
 - 데이터가 작으면(예: 수백 프레임) 과적합 주의 — 먼저 §3-5 스모크 테스트로 검증할 것.
-- **에피소드 경계**: `frodo_lan` 로더는 데이터를 하나의 연속 시퀀스로 보고 context를 인덱스 인접
-  (`iv-1..iv-5`)으로 가져옵니다. 여러 에피소드를 `image/00000000.jpg …`로 이어붙이면 **경계 프레임에서
-  context가 이전 에피소드에서 넘어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별로
-  나눠 로딩하거나 경계에서 context를 클램프하도록 `_load_split_index`/`_getitem_frodo_lan`을 보강해야
-  라벨 품질이 정확해집니다.
+- **에피소드 경계 / 분할** (해결됨): 로더가 `episode_*` 폴더를 인식해 context(`iv-1..iv-5`)를 **같은
+  에피소드로 클램프**하고, `split_by_episode: True`면 test를 **에피소드 단위로 통째 held-out**합니다
+  (train/test 누수 방지). 소량 데이터에선 `False`(인덱스 90/10)가 학습 데이터를 더 확보해 유리합니다.
 
 ---
 

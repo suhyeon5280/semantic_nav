@@ -62,6 +62,7 @@ lr: 1e-4                               # higher LR: enough data to train the ful
 optimizer: adamw
 scheduler: "cosine"
 freeze_backbone: False                 # UNFREEZE vision encoders (needs plenty of data)
+split_by_episode: True                 # large data: hold out whole episodes as test (trustworthy eval)
 warmup: True
 warmup_epochs: 3
 early_stop_patience: 5                 # allow more patience with more data
