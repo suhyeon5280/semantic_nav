@@ -101,19 +101,53 @@ LeLaN의 행동 라벨을 **teacher 모델(ExAug/MBRA, NoMaD)로 런타임 생�
 
 ## 3. 실행 방법
 
-### 3-1. 환경
-`lan_only_ft` 경로 전용 최소 conda 환경 파일(`environment_frodo_lan.yml`)을 제공합니다:
+### 3-1. 환경 (conda)
+
+`lan_only_ft` 전용 최소 환경 파일 `environment_frodo_lan.yml`을 제공합니다.
+
+**(0) conda가 없다면 먼저 설치** (이미 `conda` 명령이 되면 건너뛰기 — `conda --version`으로 확인)
 ```bash
-# 레포 루트에서
+# Miniconda 설치 (Linux x86_64)
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh
+bash ~/miniconda.sh -b -p $HOME/miniconda3
+# 현재 셸에서 conda 활성화
+source $HOME/miniconda3/etc/profile.d/conda.sh
+conda init bash        # 이후 새 터미널부터 conda 자동 사용 (zsh면 conda init zsh)
+# 새 터미널을 열거나:  exec bash
+```
+
+**(1) 환경 생성** (레포 루트 = 이 README가 있는 폴더에서)
+```bash
+cd /home/shy/suhyeon/OmniVLA_edge          # 레포 루트로 이동
 conda env create -f environment_frodo_lan.yml
+```
+> 처음엔 몇 분 걸립니다(패키지 다운로드). 다시 만들 땐 `conda env create -f environment_frodo_lan.yml --force`.
+
+**(2) 환경 활성화** — 학습/추론 전에 매번 필요
+```bash
 conda activate frodo_lan
 ```
-GPU/CUDA가 안 맞으면 torch만 해당 빌드로 교체:
+프롬프트 앞이 `(base)` → `(frodo_lan)`으로 바뀌면 성공.
+
+**(3) 설치 확인 (GPU 인식되는지)**
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # 예: CUDA 12.1
+python -c "import torch, clip, efficientnet_pytorch, lmdb; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 ```
-> 원저자의 전체 환경(`environment_mbra.yml`)은 무거운 데다 원본 전체 학습(diffusion/NoMaD)용이라, 언어 파인튜닝만
-> 할 거면 위의 `environment_frodo_lan.yml`이면 충분합니다. `diffusion_policy`/`map_cache`/`warmup_scheduler`는
+`cuda True`가 나와야 GPU 학습 가능. `False`거나 torch 설치 에러면 → CUDA 빌드로 교체:
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # 예: CUDA 12.1 (드라이버에 맞게 cu124 등)
+```
+
+**자주 쓰는 conda 명령**
+```bash
+conda deactivate            # 환경 빠져나오기
+conda env list              # 환경 목록 (frodo_lan 있는지)
+conda activate frodo_lan    # 다시 들어가기
+conda env remove -n frodo_lan   # 환경 삭제(재생성하고 싶을 때)
+```
+
+> 원저자의 전체 환경(`environment_mbra.yml`)은 무겁고 원본 전체 학습(diffusion/NoMaD)용입니다. 언어 파인튜닝만
+> 할 거면 `environment_frodo_lan.yml`로 충분합니다 — `diffusion_policy`/`map_cache`/`warmup_scheduler`는
 > 코드에서 가드되어 없어도 `lan_only_ft`가 돌아갑니다.
 
 ### 3-2. 체크포인트
