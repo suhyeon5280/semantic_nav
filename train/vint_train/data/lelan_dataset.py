@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 
 import random
+import re
 import cv2
 import matplotlib.pyplot as plt
 
@@ -1558,6 +1559,40 @@ class LeLaN_Dataset_multi(Dataset):
             torch.as_tensor(action_mask, dtype=torch.float32),             
         )                   
 
+    _PROMPT_STOPWORDS = {"a", "an", "the", "of", "on", "in", "to", "with", "and",
+                         "is", "this", "that", "near", "by", "at", "over", "onto"}
+
+    @staticmethod
+    def _prompt_text(p):
+        """Unwrap a prompt entry (str / np.str_ / (N,1) array / tuple) down to a str."""
+        while not isinstance(p, str):
+            p = p[0]
+        return p
+
+    def _prompt_is_surface(self, p):
+        """True if the prompt mentions a blocklisted surface/terrain word (any-match)."""
+        bl = getattr(self, "prompt_blocklist", None)
+        if not bl:
+            return False
+        toks = set(re.findall(r"[a-z]+", self._prompt_text(p).lower()))
+        return len(toks & bl) > 0
+
+    def _valid_object_indices(self, objs):
+        """Indices of objects that have >=1 non-surface prompt (all objects if no blocklist)."""
+        bl = getattr(self, "prompt_blocklist", None)
+        if not bl:
+            return list(range(len(objs)))
+        out = []
+        for k in range(len(objs)):
+            prompts = objs[k]["prompt"]
+            try:
+                n = len(prompts)
+            except TypeError:
+                n = 0
+            if n and any(not self._prompt_is_surface(prompts[j]) for j in range(n)):
+                out.append(k)
+        return out
+
     def _getitem_frodo_lan(self, i: int):
         """
         frodo_lan: custom LeLaN-format data (episode_*/image + episode_*/pickle_nomad) that
@@ -1567,12 +1602,19 @@ class LeLaN_Dataset_multi(Dataset):
         """
         iv = i
         objs = self.aug_data_list[iv]
+        cand = self._valid_object_indices(objs)   # objects with a non-surface prompt
         tries = 0
-        while len(objs) == 0 and tries < 50:
+        while not cand and tries < 100:
             iv = random.randint(0, len(self.image_path) - 1)
             objs = self.aug_data_list[iv]
+            cand = self._valid_object_indices(objs)
             tries += 1
-        ir = random.randint(0, len(objs) - 1) if len(objs) > 0 else 0
+        if not cand:  # fallback: give up filtering, use any object in any non-empty frame
+            while len(objs) == 0:
+                iv = random.randint(0, len(self.image_path) - 1)
+                objs = self.aug_data_list[iv]
+            cand = list(range(len(objs)))
+        ir = random.choice(cand)
         obj = objs[ir]
 
         lo = self.ep_lo[iv] if hasattr(self, "ep_lo") else 0
@@ -1609,10 +1651,10 @@ class LeLaN_Dataset_multi(Dataset):
 
         # prompt: (N,1) array / list of tuples / list of str -> unwrap to a single string
         prompts = obj["prompt"]
-        p = prompts[random.randint(0, len(prompts) - 1)]
-        while not isinstance(p, str):
-            p = p[0]
-        inst_obj = p
+        n_p = len(prompts)
+        pref = [j for j in range(n_p) if not self._prompt_is_surface(prompts[j])]
+        jsel = random.choice(pref) if pref else random.randint(0, n_p - 1)
+        inst_obj = self._prompt_text(prompts[jsel])
 
         # object pose in robot frame (forward, left)
         pose_median = np.asarray(obj["pose_median"]).reshape(-1).astype(np.float32)

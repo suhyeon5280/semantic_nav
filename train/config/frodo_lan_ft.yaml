@@ -35,6 +35,13 @@ image_size_clip: [224, 224]
 normalize: True
 context_type: temporal
 
+# Prompt filter (ON by default): skip objects whose prompts only describe surface/terrain
+# (e.g. "asphalt road", "ground drop"). Any prompt containing one of these words is treated
+# as surface; an object is used only if it has >=1 non-surface prompt. Set to [] to disable.
+prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
+                   ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
+                   path, pathway, drop, mud, cobblestone]
+
 datasets_lan:
   frodo_lan:
     # Data root holds episode_XXXX/{image,pickle_nomad}/ . image & pickle both point to the root;

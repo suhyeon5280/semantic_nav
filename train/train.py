@@ -93,8 +93,21 @@ def main_lan_only_ft(config, device, transform):
     """
     dc = config["datasets_lan"]["frodo_lan"]
 
+    # prompt blocklist: skip objects whose prompts only describe surface/terrain
+    # (e.g. "asphalt road", "ground drop"). ON by default; set prompt_blocklist: [] to disable.
+    # ground/terrain words only. Deliberately excludes material words that name real
+    # landmarks (brick/concrete -> walls, street/curb/lane -> street objects).
+    DEFAULT_PROMPT_BLOCKLIST = [
+        "asphalt", "road", "roads", "roadway", "roadways", "pavement", "paved", "tarmac",
+        "ground", "floor", "surface", "sidewalk", "gravel", "dirt", "lane", "lanes",
+        "path", "pathway", "drop", "mud", "cobblestone",
+    ]
+    blocklist = set(w.lower() for w in config.get("prompt_blocklist", DEFAULT_PROMPT_BLOCKLIST))
+    print(f"[prompt-filter] blocklist ({len(blocklist)} words) "
+          f"{'ENABLED' if blocklist else 'disabled'}")
+
     def make_ds(split):
-        return LeLaN_Dataset_multi(
+        ds = LeLaN_Dataset_multi(
             data_split_folder=dc[split],
             dataset_name="frodo_lan",
             image_size=config["image_size"],
@@ -112,6 +125,8 @@ def main_lan_only_ft(config, device, transform):
             aug_seq=dc.get("aug_seq", False),
             only_front=dc.get("only_front", True),
         )
+        ds.prompt_blocklist = blocklist
+        return ds
 
     train_loader = DataLoader(
         make_ds("train"), batch_size=config["batch_size"], shuffle=True,
