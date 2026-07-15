@@ -315,6 +315,26 @@ heading_cos           0.xxxx      0.xxxx      +0.xxxx   (higher) <-- improved
 > 지표는 `nomad_traj_norm`(데이터의 궤적 라벨) 기준입니다. 궁극적으로는 실제 로봇/시뮬레이터에서의
 > 정성 평가가 가장 신뢰도 높습니다.
 
+### 궤적 시각화 — `visualize_traj.py`
+수치 대신 **실제 예측 궤적을 눈으로** 비교합니다. 왼쪽에 장면 이미지 + **객체 bbox(빨간 박스)** + prompt,
+오른쪽에 조감도 궤적(GT · base · 파인튜닝 · 객체 위치 ★ · 로봇 ■). 데이터셋 코드에 의존하지 않는 독립 스크립트입니다.
+
+```bash
+cd train
+# 기본: base vs logs_frodo_lan_ft/best.pth
+python visualize_traj.py
+
+# 특정/여러 체크포인트 비교, 샘플 수·출력 지정
+python visualize_traj.py --ft logs_frodo_lan_ft/2026_07_15_10_51_28/best.pth --n 6 --out compare.png
+python visualize_traj.py --ft runA/best.pth --ft runB/best.pth        # 여러 개(반복)
+
+# 특정 에피소드에서만 뽑기
+python visualize_traj.py --episode episode_0037 --n 6
+```
+옵션: `--base`(기본 `omnivla-edge.pth`), `--ft`(반복 가능), `--episode`, `--n`, `--seed`, `--out`.
+결과 PNG로 **파인튜닝이 GT 궤적을 잘 따라가는지 / 궤적이 객체 방향을 향하는지**를 바로 확인할 수 있습니다.
+(생성 PNG `eval_*.png`는 `.gitignore` 처리됨.)
+
 ## 6. 알려진 문제 / 주의점
 
 ### 이 레포 전반 (원본 정리 전 코드)
