@@ -16,6 +16,7 @@ lan_only_ft: True
 # --- checkpoint to fine-tune + output dir (separate from the small-data preset) ---
 load_edge_ckpt: ./omnivla-edge.pth
 output_dir: ./logs_frodo_lan_ft_full
+timestamp_run: True                    # save each run to output_dir/<start-time>/ (no overwrite)
 
 # --- model params (MUST match omnivla-edge.pth) ---
 model_type: il_exaug_gps_map2_lan

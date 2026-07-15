@@ -197,6 +197,9 @@ def main_lan_only_ft(config, device, transform):
             print("[warmup] warmup_scheduler not installed -> using plain cosine (no warmup)")
 
     out = config.get("output_dir", "./logs_frodo_lan_ft")
+    if config.get("timestamp_run", True):
+        # per-run subfolder named by start time -> never overwrites a previous run
+        out = os.path.join(out, time.strftime("%Y_%m_%d_%H_%M_%S"))
     os.makedirs(out, exist_ok=True)
     print("Saving fine-tuned checkpoints to", out)
 

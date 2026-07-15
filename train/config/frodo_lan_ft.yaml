@@ -16,6 +16,7 @@ lan_only_ft: True                      # <-- activates the trimmed language-only
 # --- checkpoint to fine-tune (already in the repo) + output dir ---
 load_edge_ckpt: ./omnivla-edge.pth     # relative to train/ ; change if you move it
 output_dir: ./logs_frodo_lan_ft
+timestamp_run: True                    # save each run to output_dir/<start-time>/ (no overwrite)
 
 # --- model params (MUST match omnivla-edge.pth; verified against the checkpoint) ---
 model_type: il_exaug_gps_map2_lan
