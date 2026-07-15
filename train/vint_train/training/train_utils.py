@@ -10031,7 +10031,7 @@ def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transf
     was_training = model.training
     model.eval()
     text_encoder.eval()
-    act_losses, obj_losses, base_divs = [], [], []
+    act_losses, obj_losses, base_divs, head_coss = [], [], [], []
     for i, data in enumerate(dataloader_lan):
         if max_batches is not None and i >= max_batches:
             break
@@ -10069,8 +10069,11 @@ def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transf
         a_pred, d_pred, _ = model(
             obs_image_lan, goal_pose_gps_lan, map_images_lan, goal_img, gm_lan, feat_text_lan, cur_large_img
         )
-        act_losses.append(F.mse_loss(a_pred, nomad_traj_lan.to(device)).item())
+        gt_lan = nomad_traj_lan.to(device)
+        act_losses.append(F.mse_loss(a_pred, gt_lan).item())
         obj_losses.append(F.mse_loss(a_pred[:, -1, 0:2], goal_pos_lan / 0.125).item())
+        # direction agreement (reliable under noisy depth): cos-sim of heading (cos,sin) channels
+        head_coss.append(F.cosine_similarity(a_pred[:, :, 2:], gt_lan[:, :, 2:], dim=-1).mean().item())
 
         # ---- basic-driving regression: IMAGE goal (mask 6 = obs + image), base vs fine-tuned ----
         if base_model is not None:
@@ -10085,10 +10088,13 @@ def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transf
 
     if was_training:
         model.train()
+    heading_cos = float(np.mean(head_coss)) if head_coss else float("nan")
     return {
         "test_action_loss": float(np.mean(act_losses)) if act_losses else float("nan"),
         "test_obj_loss": float(np.mean(obj_losses)) if obj_losses else float("nan"),
         "base_divergence_imagegoal": float(np.mean(base_divs)) if base_divs else float("nan"),
+        "heading_cos": heading_cos,                # direction agreement (higher=better; depth-robust)
+        "direction_err": 1.0 - heading_cos,        # early-stop criterion (lower=better)
     }
 
 

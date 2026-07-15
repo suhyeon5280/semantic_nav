@@ -213,7 +213,7 @@ def main_lan_only_ft(config, device, transform):
     print("Saving fine-tuned checkpoints to", out)
 
     patience = int(config.get("early_stop_patience", 3))
-    best_loss = float("inf")
+    best_derr = float("inf")   # best direction error (1 - heading_cos); lower = better
     best_epoch = -1
     since_improve = 0
 
@@ -229,30 +229,33 @@ def main_lan_only_ft(config, device, transform):
             scheduler.step()
 
         metrics = evaluate_lan_only_ft(model, base_model, text_encoder, test_loader, transform, device)
-        print(f"[eval] epoch {epoch}  test_action_loss={metrics['test_action_loss']:.4f}  "
-              f"test_obj_loss={metrics['test_obj_loss']:.4f}  "
-              f"base_divergence(image-goal)={metrics['base_divergence_imagegoal']:.4f}")
+        # Early stopping / best-checkpoint selection uses the DIRECTION metric (heading_cos),
+        # which is robust to the noisy (model-inferred) object depth. This is selection only;
+        # the TRAINING loss is unchanged from base, so fine-tuning does not drift the objective.
+        print(f"[eval] epoch {epoch}  heading_cos={metrics['heading_cos']:.4f}  "
+              f"(action_loss={metrics['test_action_loss']:.4f}  obj_loss={metrics['test_obj_loss']:.4f}  "
+              f"base_divergence(image-goal)={metrics['base_divergence_imagegoal']:.4f})")
         if config["use_wandb"] and wandb is not None:
             wandb.log({f"eval/{k}": v for k, v in metrics.items()})
 
         torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
 
-        cur = metrics["test_action_loss"]
-        if cur < best_loss:
-            best_loss = cur
+        cur = metrics["direction_err"]   # 1 - heading_cos (lower = better)
+        if cur < best_derr:
+            best_derr = cur
             best_epoch = epoch
             since_improve = 0
             torch.save(model.state_dict(), os.path.join(out, "best.pth"))
-            print(f"[save] new best (test_action_loss={best_loss:.4f}) -> {out}/best.pth")
+            print(f"[save] new best (heading_cos={metrics['heading_cos']:.4f}) -> {out}/best.pth")
         else:
             since_improve += 1
             print(f"[early-stop] no improvement {since_improve}/{patience} "
-                  f"(best={best_loss:.4f} @ epoch {best_epoch})")
+                  f"(best heading_cos={1.0 - best_derr:.4f} @ epoch {best_epoch})")
             if since_improve >= patience:
                 print(f"[early-stop] stopping at epoch {epoch}; best epoch was {best_epoch}")
                 break
 
-    print(f"FINISHED LAN-ONLY FINE-TUNE (best test_action_loss={best_loss:.4f} "
+    print(f"FINISHED LAN-ONLY FINE-TUNE (best heading_cos={1.0 - best_derr:.4f} "
           f"@ epoch {best_epoch}) -> {out}/best.pth")
 
 
