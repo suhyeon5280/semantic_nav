@@ -3,7 +3,10 @@ sys.path.append('../diffusion_policy')
 #sys.path.append('./')
 
 import os
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None  # optional; lan_only_ft runs with use_wandb: False and no wandb installed
 import argparse
 import numpy as np
 import yaml
@@ -196,7 +199,7 @@ def main_lan_only_ft(config, device, transform):
         print(f"[eval] epoch {epoch}  test_action_loss={metrics['test_action_loss']:.4f}  "
               f"test_obj_loss={metrics['test_obj_loss']:.4f}  "
               f"base_divergence(image-goal)={metrics['base_divergence_imagegoal']:.4f}")
-        if config["use_wandb"]:
+        if config["use_wandb"] and wandb is not None:
             wandb.log({f"eval/{k}": v for k, v in metrics.items()})
 
         torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
@@ -1865,7 +1868,7 @@ if __name__ == "__main__":
     if config.get("lan_only_ft", False):
         # self-contained fine-tune: skip the frodobot project_folder / wandb-resume setup
         config.setdefault("project_folder", config.get("output_dir", "./logs_frodo_lan_ft"))
-        if config.get("use_wandb", False):
+        if config.get("use_wandb", False) and wandb is not None:
             wandb.init(project=config["project_name"], settings=wandb.Settings(start_method="fork"))
             wandb.run.name = config["run_name"]
             wandb.config.update(config, allow_val_change=True)

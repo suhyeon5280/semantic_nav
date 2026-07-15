@@ -147,8 +147,8 @@ conda env remove -n frodo_lan   # 환경 삭제(재생성하고 싶을 때)
 ```
 
 > 원저자의 전체 환경(`environment_mbra.yml`)은 무겁고 원본 전체 학습(diffusion/NoMaD)용입니다. 언어 파인튜닝만
-> 할 거면 `environment_frodo_lan.yml`로 충분합니다 — `diffusion_policy`/`map_cache`/`warmup_scheduler`는
-> 코드에서 가드되어 없어도 `lan_only_ft`가 돌아갑니다.
+> 할 거면 `environment_frodo_lan.yml`로 충분합니다 — `diffusion_policy`/`map_cache`/`warmup_scheduler`/`wandb`는
+> 코드에서 가드되어 없어도 `lan_only_ft`가 돌아갑니다(`use_wandb: False`가 기본).
 
 ### 3-2. 체크포인트
 `omnivla-edge.pth`(HF: `NHirose/omnivla-edge`)를 `train/omnivla-edge.pth`에 둡니다. config의

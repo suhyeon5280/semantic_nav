@@ -1,4 +1,7 @@
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None  # optional
 import os
 import numpy as np
 import copy

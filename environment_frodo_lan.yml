@@ -27,7 +27,6 @@ dependencies:
       - prettytable
       - utm
       - psutil
-      - wandb
       - diffusers
       - ftfy           # CLIP dependency
       - regex          # CLIP dependency

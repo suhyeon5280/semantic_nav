@@ -8,7 +8,10 @@ try:
 except Exception:
     MapTileCache = None  # only needed for the satellite-map (frodobot) training paths
 
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None  # optional
 import os
 import numpy as np
 import yaml
@@ -10004,7 +10007,7 @@ def train_lan_only_ft(
                     f"action={action_loss_logger.latest():.4f} "
                     f"obj={obj_loss_logger.latest():.4f}"
                 )
-                if use_wandb:
+                if use_wandb and wandb is not None:
                     wandb.log(
                         {
                             "total_loss": losses["total_loss"].item(),
