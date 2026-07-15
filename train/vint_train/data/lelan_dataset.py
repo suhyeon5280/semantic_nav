@@ -146,7 +146,7 @@ class LeLaN_Dataset(Dataset):
                             print(self.image_path[num])
 
         # Reopen the cache file in read-only mode
-        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True)
+        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True, lock=False, readahead=False, meminit=False)
 
     def _sample_negative(self):
         """
@@ -649,7 +649,7 @@ class LeLaN_Dataset_multi(Dataset):
                             print(self.image_path[num])
 
         # Reopen the cache file in read-only mode
-        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True)
+        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True, lock=False, readahead=False, meminit=False)
 
     def _sample_negative(self):
         """
@@ -1181,7 +1181,7 @@ class LeLaN_Dataset_multi(Dataset):
                             print(self.image_path[num])
 
         # Reopen the cache file in read-only mode        
-        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True)
+        self._image_cache: lmdb.Environment = lmdb.open(cache_filename, readonly=True, lock=False, readahead=False, meminit=False)
 
     def _sample_negative(self):
         """

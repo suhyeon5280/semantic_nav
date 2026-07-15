@@ -62,6 +62,14 @@ if __name__ == "__main__":
     ])
 
     dc = cfg["datasets_lan"]["frodo_lan"]
+    # match training: same split strategy + prompt filter
+    LeLaN_Dataset_multi.split_by_episode = bool(cfg.get("split_by_episode", False))
+    _default_bl = ["asphalt", "road", "roads", "roadway", "roadways", "pavement", "paved", "tarmac",
+                   "ground", "floor", "surface", "sidewalk", "gravel", "dirt", "lane", "lanes",
+                   "path", "pathway", "drop", "mud", "cobblestone"]
+    _blocklist = set(w.lower() for w in cfg.get("prompt_blocklist", _default_bl))
+    print(f"[eval] split={'episode' if LeLaN_Dataset_multi.split_by_episode else 'index'} "
+          f"| prompt-filter {'ON' if _blocklist else 'off'}")
     test_ds = LeLaN_Dataset_multi(
         data_split_folder=dc["test"], dataset_name="frodo_lan", image_size=cfg["image_size"],
         waypoint_spacing=dc.get("waypoint_spacing", 1), len_traj_pred=cfg["len_traj_pred"],
@@ -70,6 +78,7 @@ if __name__ == "__main__":
         context_type=cfg.get("context_type", "temporal"), normalize=cfg["normalize"],
         backside=dc.get("backside", False), aug_seq=dc.get("aug_seq", False), only_front=dc.get("only_front", True),
     )
+    test_ds.prompt_blocklist = _blocklist
     loader = DataLoader(test_ds, batch_size=cfg.get("eval_batch_size", cfg["batch_size"]),
                         shuffle=False, num_workers=cfg["num_workers"], drop_last=False)
 
