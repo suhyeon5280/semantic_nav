@@ -1903,7 +1903,7 @@ if __name__ == "__main__":
                 
         
     if config["use_wandb"]:
-        os.environ["WANDB_API_KEY"] = "f75d70faa46b5b328a3a7c85922ede0db348c2a6"
+        # Use your own credentials: `wandb login` in the shell, or set WANDB_API_KEY env var.
         wandb.login()
         if "load_run" in config and config["keep_learning"] and not config["aug_shadow"] and not config["ft_frod"]:
             api = wandb.Api()
