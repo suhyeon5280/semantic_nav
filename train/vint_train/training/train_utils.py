@@ -10153,3 +10153,92 @@ def eval_metrics_lan(model, text_encoder, dataloader_lan, transform, device, goa
         "heading_cos": s_cos / n,
         "n": n,
     }
+
+
+def train_multimodal_ft(
+    model, mbra, text_encoder, optimizer, dataloader_lan, transform, device,
+    project_folder, epoch, print_log_freq=20, use_wandb=False, freeze_backbone=False,
+):
+    """
+    Multi-modal fine-tune (language/position + image-goal) on frodo_lan, matching OmniVLA/edge:
+      - goal_id == 0  -> language(7)/language+position(8), target = precomputed nomad_traj_norm (raw)
+      - goal_id  > 0  -> image-goal(6, future frame),      target = MBRA (ExAug) synthetic trajectory
+    `mbra` is the ExAug_dist_delay teacher (mbra.pth). Runtime-generated image-goal targets, exactly
+    like the original train_il_exaug_dist_gnm_gps_map2_lan LeLaN branch.
+    """
+    model.train()
+    if freeze_backbone:
+        model.obs_encoder.eval(); model.goal_encoder.eval(); model.goal_encoder_img.eval()
+    text_encoder.eval().to(device)
+    mbra.eval().to(device)
+    MWS_MBRA = 0.125
+
+    tot = Logger("total_loss", "train", window_size=print_log_freq)
+    act = Logger("action_loss", "train", window_size=print_log_freq)
+    imgl = Logger("img_frac", "train", window_size=print_log_freq)
+    with tqdm.tqdm(dataloader_lan, desc=f"mm-ft ep{epoch}", leave=False) as tepoch:
+        for i, data in enumerate(tepoch):
+            (obs_images_lan, goal_image_lan, cur_large_img_lan, goal_pos_lan, obj_inst_lan,
+             goal_pos_norm_lan, goal_image_full_lan, goal_image_full_8_lan, distance_lan,
+             action_mask_lan, nomad_traj_lan) = data
+            B = obs_images_lan.shape[0]
+
+            ol = torch.split(obs_images_lan, 3, dim=1)
+            obs_map = ol[-1].to(device)
+            obs_t = torch.cat([transform(x).to(device) for x in ol], dim=1)
+            z = torch.zeros(B, 3, 96, 96)
+            map_t = torch.cat((transform(z).to(device), transform(z).to(device), obs_map), axis=1)
+            goal_img = transform(goal_image_full_lan).to(device)         # iv+goal_id (image-goal token)
+            goal_img8 = transform(goal_image_full_8_lan).to(device)      # iv+8 (MBRA goal)
+            cur_large = transform(cur_large_img_lan).to(device)
+
+            tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
+            with torch.no_grad():
+                feat = text_encoder.encode_text(tokens)
+
+            gp = goal_pos_lan.to(device)
+            dis = torch.sqrt(gp[:, 1:2] ** 2 + gp[:, 0:1] ** 2) + 1e-6
+            goal_pose = torch.cat((gp[:, 1:2], -gp[:, 0:1], gp[:, 1:2] / dis, -gp[:, 0:1] / dis), axis=1).to(device)
+
+            # ---- MBRA teacher -> image-goal trajectory (exact original block) ----
+            rsize = 0.3 * torch.ones(B, 1, 1).to(device)
+            delay = torch.zeros(B, 1, 1).to(device)
+            vel_past = torch.cat((0.5 * torch.ones(B, 6), 0.0 * torch.ones(B, 6)), axis=1).unsqueeze(2).to(device)
+            with torch.no_grad():
+                lin, ang, _ = mbra(obs_t, goal_img8, rsize, delay, vel_past)
+            px, pz, ry = robot_pos_model_fix(lin, ang)
+            x_traj = torch.cat([px[c].unsqueeze(1) for c in range(len(px))], axis=1)
+            zt = torch.cat([pz[c].unsqueeze(1) for c in range(len(pz))], axis=1)
+            yaw = torch.cat([ry[c].unsqueeze(1) for c in range(len(ry))], axis=1)
+            action_mbra = torch.cat((zt.unsqueeze(-1) / MWS_MBRA, -x_traj.unsqueeze(-1) / MWS_MBRA,
+                                     torch.cos(-yaw).unsqueeze(-1), torch.sin(-yaw).unsqueeze(-1)), axis=2)
+
+            # ---- per-sample modality + action target ----
+            gid = distance_lan.to(device)                       # 0 -> lang/pos, >0 -> image-goal
+            gmask = []
+            for k in range(B):
+                gmask.append(6 if gid[k] != 0 else random.choice([7, 8]))
+            goal_mask_lan = torch.tensor(gmask, dtype=torch.long, device=device)
+            m_img = (gid != 0).float().view(-1, 1, 1).repeat(1, 8, 4)
+            action_ref = (1.0 - m_img) * nomad_traj_lan.to(device) + m_img * action_mbra.detach()
+
+            action_pred, dist_pred, _ = model(obs_t, goal_pose, map_t, goal_img, goal_mask_lan, feat, cur_large)
+
+            action_loss = F.mse_loss(action_pred, action_ref)
+            lan_bool = (goal_mask_lan == 7) | (goal_mask_lan == 8)
+            if lan_bool.any():
+                obj_loss = F.mse_loss(action_pred[lan_bool][:, -1, 0:2], (gp / 0.125)[lan_bool])
+            else:
+                obj_loss = torch.tensor(0.0, device=device)
+            smooth = F.mse_loss(action_pred[:, 0:-1], action_pred[:, 1:])
+            loss = action_loss + 0.1 * obj_loss + 0.05 * smooth
+
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+
+            tot.log_data(loss.item()); act.log_data(action_loss.item()); imgl.log_data(m_img[:, 0, 0].mean().item())
+            if print_log_freq != 0 and i % print_log_freq == 0:
+                print(f"(epoch {epoch}) (batch {i}/{len(dataloader_lan)-1}) "
+                      f"total={tot.latest():.4f} action={act.latest():.4f} img_frac={imgl.latest():.2f}")
+                if use_wandb and wandb is not None:
+                    wandb.log({"total_loss": loss.item(), "action_loss": action_loss.item(),
+                               "obj_loss": float(obj_loss), "img_frac": float(m_img[:,0,0].mean())})

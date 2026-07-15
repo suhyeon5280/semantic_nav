@@ -1693,9 +1693,15 @@ class LeLaN_Dataset_multi(Dataset):
 
         cur_image_large = self._resize_norm(image_fullsize, self.image_size_clip)
 
+        # goal_id: 0 -> language/position modality (current frame). >0 -> image-goal modality
+        # (a future frame in this episode). Only sampled when use_image_goal is enabled.
         goal_id = 0
+        if getattr(self, "use_image_goal", False) and random.random() > 0.8:
+            goal_id = random.randint(1, min(8, hi - iv)) if hi > iv else 0
+        gi = min(hi, iv + goal_id)
         gi8 = min(hi, iv + 8)
-        goal_full = image_fullsize                                   # goal_id == 0 -> current frame
+        goal_full = (image_fullsize if goal_id == 0
+                     else TF.resize(self._load_image_front(self.image_path[gi]), (224, 224)))
         goal_full_8 = TF.resize(self._load_image_front(self.image_path[gi8]), (224, 224))
         goal_image_full = self._resize_norm(goal_full, self.image_size)
         goal_image_full_8 = self._resize_norm(goal_full_8, self.image_size)

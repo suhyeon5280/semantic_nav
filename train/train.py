@@ -74,7 +74,7 @@ from vint_train.training.train_eval_loop import (
     train_eval_loop_il_exaug_dist_gnm_gps_map2_lan_bdd,
     load_model,
 )
-from vint_train.training.train_utils import train_lan_only_ft, evaluate_lan_only_ft
+from vint_train.training.train_utils import train_lan_only_ft, evaluate_lan_only_ft, train_multimodal_ft
 #path_save_load = "."
 path_save_load = "/nfs/kun2/users/noriaki/checkpoints"
 
@@ -106,6 +106,11 @@ def main_lan_only_ft(config, device, transform):
     print(f"[prompt-filter] blocklist ({len(blocklist)} words) "
           f"{'ENABLED' if blocklist else 'disabled'}")
 
+    # Multi-modal path: also train image-goal (mask 6) using the MBRA (ExAug) teacher.
+    # Off -> language/position only (masks 7/8) from precomputed nomad_traj_norm.
+    use_image_goal = bool(config.get("use_image_goal", False))
+    print(f"[modality] {'language+image-goal (MBRA teacher)' if use_image_goal else 'language/position only'}")
+
     # train/test split strategy (read by LeLaN_Dataset_multi._load_split_index):
     #   False -> 90/10 by frame index (small data: keeps almost all frames for training)
     #   True  -> hold out whole episodes as test (large data: trustworthy, no leakage)
@@ -135,6 +140,7 @@ def main_lan_only_ft(config, device, transform):
             only_front=dc.get("only_front", True),
         )
         ds.prompt_blocklist = blocklist
+        ds.use_image_goal = use_image_goal   # enables goal_id>0 (future-frame image goals)
         return ds
 
     train_loader = DataLoader(
@@ -195,6 +201,29 @@ def main_lan_only_ft(config, device, transform):
     text_encoder, _ = clip.load(config["clip_type"])
     text_encoder.to(torch.float32).to(device)
 
+    # ---- MBRA (ExAug) teacher for the image-goal modality ----
+    mbra = None
+    if use_image_goal:
+        from vint_train.models.exaug.exaug import ExAug_dist_delay
+        mbra_path = config.get("load_mbra", "./mbra.pth")
+        mbra = ExAug_dist_delay(
+            context_size=config["context_size"], len_traj_pred=config["len_traj_pred"],
+            learn_angle=config["learn_angle"], obs_encoder=config["obs_encoder"],
+            obs_encoding_size=config["obs_encoding_size"], late_fusion=config["late_fusion"],
+            mha_num_attention_heads=config["mha_num_attention_heads"],
+            mha_num_attention_layers=config["mha_num_attention_layers"],
+            mha_ff_dim_factor=config["mha_ff_dim_factor"],
+        )
+        msd = torch.load(mbra_path, map_location="cpu")
+        if isinstance(msd, dict) and "state_dict" in msd:
+            msd = msd["state_dict"]
+        msd = {(k[7:] if k.startswith("module.") else k): v for k, v in msd.items()}
+        mm, mu = mbra.load_state_dict(msd, strict=False)
+        print(f"[mbra] loaded {mbra_path}. missing={len(mm)} unexpected={len(mu)}")
+        mbra = mbra.to(device).eval()
+        for p in mbra.parameters():
+            p.requires_grad = False
+
     optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=float(config["lr"]))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
     if config.get("warmup", True):
@@ -217,14 +246,37 @@ def main_lan_only_ft(config, device, transform):
     best_epoch = -1
     since_improve = 0
 
+    # Optional base-driving protection cap on image-goal divergence.
+    # ONLY meaningful for the language-only path: there, image-goal is NOT trained, so a
+    # growing divergence means language FT is corrupting the shared decoder -> stop early.
+    # When MBRA image-goal IS trained (use_image_goal), image-goal divergence is EXPECTED
+    # (it's a training target, not drift) -> the cap is force-disabled.
+    base_div_cap = config.get("base_divergence_max", None)
+    if use_image_goal:
+        base_div_cap = None
+        print("[cap] base_divergence cap DISABLED (MBRA image-goal is a trained target)")
+    elif base_div_cap is not None:
+        print(f"[cap] base_divergence cap = {base_div_cap} (language-only base-driving protection)")
+    else:
+        print("[cap] base_divergence cap OFF (set base_divergence_max to enable, language-only)")
+
     for epoch in range(config["epochs"]):
-        train_lan_only_ft(
-            model=model, text_encoder=text_encoder, optimizer=optimizer,
-            dataloader_lan=train_loader, transform=transform, device=device,
-            project_folder=out, epoch=epoch,
-            print_log_freq=config.get("print_log_freq", 20),
-            use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
-        )
+        if use_image_goal:
+            train_multimodal_ft(
+                model=model, mbra=mbra, text_encoder=text_encoder, optimizer=optimizer,
+                dataloader_lan=train_loader, transform=transform, device=device,
+                project_folder=out, epoch=epoch,
+                print_log_freq=config.get("print_log_freq", 20),
+                use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
+            )
+        else:
+            train_lan_only_ft(
+                model=model, text_encoder=text_encoder, optimizer=optimizer,
+                dataloader_lan=train_loader, transform=transform, device=device,
+                project_folder=out, epoch=epoch,
+                print_log_freq=config.get("print_log_freq", 20),
+                use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
+            )
         if scheduler is not None:
             scheduler.step()
 
@@ -239,6 +291,12 @@ def main_lan_only_ft(config, device, transform):
             wandb.log({f"eval/{k}": v for k, v in metrics.items()})
 
         torch.save(model.state_dict(), os.path.join(out, "latest.pth"))
+
+        # base-driving protection cap (language-only path only; disabled when MBRA is on)
+        if base_div_cap is not None and metrics["base_divergence_imagegoal"] > base_div_cap:
+            print(f"[early-stop] base_divergence {metrics['base_divergence_imagegoal']:.3f} > "
+                  f"cap {base_div_cap} -> stopping to protect base driving (best @ epoch {best_epoch})")
+            break
 
         cur = metrics["direction_err"]   # 1 - heading_cos (lower = better)
         if cur < best_derr:

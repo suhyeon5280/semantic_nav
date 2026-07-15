@@ -211,24 +211,45 @@ freeze_backbone: True
 > 에피소드를 물어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별 분리/경계 처리가
 > 필요할 수 있습니다(§6 참고).
 
-### 3-6. 데이터 규모별 프리셋 (소량 vs 대용량)
-데이터 양에 따라 두 개의 config를 준비해뒀습니다. **데이터만 `omnivla_dataset/`에 더 넣고 config만 고르면** 됩니다.
+### 3-6. 프리셋 (소량 언어전용 vs 대용량 범용)
+두 개의 config를 준비해뒀습니다. **데이터만 `omnivla_dataset/`에 더 넣고 config만 고르면** 됩니다.
 
-| | `config/frodo_lan_ft.yaml` (소량, 기본) | `config/frodo_lan_ft_full.yaml` (대용량) |
+**두 프리셋 모두 범용(언어 + 이미지-goal)** 을 학습합니다. 차이는 **데이터 규모에 맞춘 하이퍼파라미터**(백본 freeze / lr / epochs / split)뿐입니다.
+
+| | `config/frodo_lan_ft.yaml` (소량, 보수적) | `config/frodo_lan_ft_full.yaml` (대용량) |
 |---|---|---|
+| **학습 모달리티** | 언어/pose + 이미지-goal (mask 6·7·8) | 언어/pose + 이미지-goal (mask 6·7·8) |
+| `use_image_goal` / teacher | **True** / MBRA (`mbra.pth`) | **True** / MBRA (`mbra.pth`) |
 | `freeze_backbone` | **True** (시각 인코더 고정) | **False** (전체 학습) |
 | `lr` | 2e-5 | 1e-4 |
 | `epochs` | 12 | 40 |
 | `early_stop_patience` | 3 | 5 |
 | `split_by_episode` | **False** (인덱스 90/10) | **True** (에피소드 통째 held-out) |
 | `output_dir` | `./logs_frodo_lan_ft` | `./logs_frodo_lan_ft_full` |
-| prompt 필터 | 동일 (ON) | 동일 (ON) |
+| prompt 필터 / cap | ON / **cap 없음** (MBRA 켜짐) | ON / **cap 없음** (MBRA 켜짐) |
 
 - **`split_by_episode`**: 소량일 땐 False가 유리 — 에피소드 단위로 빼면 (3개 중 1개=33%처럼) 학습 데이터가 크게 줄기 때문. 대용량일 땐 True로 두면 test 에피소드가 train과 완전히 분리돼 **지표 신뢰도**가 높아짐(train/test 누수 없음). 캐시는 전략·프레임수별로 따로 생성되어 전환 시 자동 재빌드됩니다.
 
-- **소량(에피소드 몇 개)** → `frodo_lan_ft.yaml` (과적합 방지 우선).
+- **소량(에피소드 몇 개)** → `frodo_lan_ft.yaml` (백본 고정·저LR로 과적합 방지).
 - **데이터 충분** → `frodo_lan_ft_full.yaml` (백본까지 당신 도메인에 맞춰 학습).
-- 데이터 경로(`datasets_lan`)는 두 파일에서 동일하게 유지하세요.
+- 두 프리셋 다 **MBRA 체크포인트 필요** (아래 3-7). 데이터 경로(`datasets_lan`)는 두 파일에서 동일하게 유지하세요.
+- **cap**: `use_image_goal: True`이면 이미지-goal이 학습 대상이므로 `base_divergence` cap은 **자동 비활성**입니다. 순수 언어전용으로 돌리고 싶을 때만 `use_image_goal: False` + `base_divergence_max: 0.5`로 base 주행 보호 cap을 켤 수 있습니다.
+
+### 3-7. 범용(이미지-goal) 학습 — MBRA teacher 준비
+LeLaN 데이터는 원본 OmniVLA에서 **두 가지 역할**로 쓰입니다: (1) 언어/pose → 궤적 라벨(`nomad_traj_norm`, 우리 데이터에 이미 있음), (2) **이미지-goal → MBRA teacher가 런타임에 생성**하는 궤적. `frodo_lan_ft_full.yaml`은 이 둘을 모두 학습하는 **범용 모델**입니다.
+
+- **이미지-goal(mask 6)**: loader가 20% 확률로 같은 에피소드의 **미래 프레임**을 goal 이미지로 뽑고(`goal_id>0`), 그 궤적 타겟을 MBRA(`ExAug_dist_delay`)가 생성합니다. 언어/pose(mask 7·8, `goal_id==0`)는 그대로 `nomad_traj_norm`을 씁니다.
+- **타겟 혼합**: `action_ref = (goal_id==0 ? nomad_traj_norm : MBRA_traj)` — 원본 OmniVLA/edge와 동일.
+- **base_divergence cap 없음**: 이미지-goal이 이제 **학습 대상**이므로(부작용 이탈이 아니라), 언어전용 경로의 divergence cap을 이 경로에는 적용하지 않습니다.
+
+**MBRA 체크포인트 다운로드** (약 395MB, `ExAug_dist_delay` 가중치):
+```bash
+cd train
+wget "https://huggingface.co/NHirose/MBRA/resolve/main/mbra.pth" -O mbra.pth
+```
+- config의 `load_mbra: ./mbra.pth`가 이 파일을 가리킵니다. 다른 곳에 두면 경로만 바꾸세요.
+- 우리 레포의 `ExAug_dist_delay`에 **정확히 로드**됩니다(검증됨: missing=0, unexpected=0). MBRA "데이터"나 코드베이스 clone은 **필요 없습니다** — 가중치 파일 하나면 됩니다.
+- `*.pth`는 `.gitignore`에 있어 커밋되지 않습니다.
 
 ### 체크포인트 — 실행마다 시각 폴더로 저장 (덮어쓰기 없음) ✅
 - `timestamp_run: True`(기본)이면 각 실행이 **`output_dir/<시작시각>/`** 하위 폴더에 저장됩니다

@@ -1,17 +1,25 @@
 # =====================================================================
 # Fine-tune OmniVLA-edge (IL_gps_map_mask3_lan2) on custom LeLaN-format data.
-# >>> LARGE-DATASET preset: UNFREEZE the vision backbone, higher LR, more epochs.
-#     For a small dataset (a few episodes) use config/frodo_lan_ft.yaml instead. <<<
-# LANGUAGE-ONLY path (same pipeline as frodo_lan_ft.yaml):
-#   - NO frodobot / gnm / bdd datasets, NO NoMaD / ExAug teacher
-#   - action labels come from the dataset's `nomad_traj_norm`
+# >>> GENERAL / MULTI-MODAL preset: language(7)/position(8) + IMAGE-GOAL(6).
+#     UNFREEZE the vision backbone, higher LR, more epochs.
+#     For a small language-only run use config/frodo_lan_ft.yaml instead. <<<
+# This preset trains BOTH LeLaN roles, exactly like OmniVLA/edge:
+#   - language/position (masks 7/8): target = dataset's precomputed `nomad_traj_norm` (raw)
+#   - image-goal (mask 6, future frame): target = MBRA (ExAug) teacher, generated at runtime
+#   - requires the MBRA checkpoint (mbra.pth); NO frodobot/gnm/bdd, NO NoMaD teacher
 #   - saves to a SEPARATE output_dir so it won't overwrite the small-data run
 # Run:  python train.py -c config/frodo_lan_ft_full.yaml
 # =====================================================================
 
 project_name: frodobot-gnm-lelan
 run_name: frodo_lan_ft_full
-lan_only_ft: True
+lan_only_ft: True                      # uses the trimmed frodo_lan pipeline (main_lan_only_ft)
+
+# --- multi-modal (image-goal) settings ---
+use_image_goal: True                   # <-- also train image-goal (mask 6) via MBRA teacher
+load_mbra: ./mbra.pth                   # MBRA (ExAug_dist_delay) teacher weights (HF NHirose/MBRA)
+# base_divergence_max:                 # base-driving cap; IGNORED while use_image_goal is True.
+                                       # Only enable (e.g. 0.5) if you set use_image_goal: False.
 
 # --- checkpoint to fine-tune + output dir (separate from the small-data preset) ---
 load_edge_ckpt: ./omnivla-edge.pth

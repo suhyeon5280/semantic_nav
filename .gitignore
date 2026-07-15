@@ -6,8 +6,9 @@ train/vint_train/data/sampler/
 **/wandb/
 # Model checkpoints (do not commit large weights, incl. omnivla-edge.pth)
 *.pth
-# Fine-tune output dir
+# Fine-tune output dirs
 train/logs_frodo_lan_ft/
+train/logs_frodo_lan_ft_full/
 # frodo_lan LMDB cache (rebuilt from data)
 omnivla_dataset/_cache/
 # Raw dataset (do not commit ~32MB of images/pkl)
