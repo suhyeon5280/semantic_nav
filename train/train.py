@@ -30,26 +30,32 @@ from diffusers.optimization import get_scheduler
 """
 IMPORT YOUR MODEL HERE
 """
-from vint_train.models.gnm.gnm import GNM
-from vint_train.models.vint.vint import ViNT
-from vint_train.models.exaug.exaug import ExAug_dist_delay
+# --- needed for lan_only_ft (clean, light deps) ---
 from vint_train.models.il.il import IL_dist, IL_gps, IL_gps_map_mask, IL_gps_map_mask3, IL_gps_map_mask3_lan, IL_gps_map_mask3_lan2
-from vint_train.models.vint.vit import ViT
-from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
-from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
+from vint_train.data.lelan_dataset import LeLaN_Dataset, LeLaN_Dataset_multi
+
 try:
     from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 except Exception:
     ConditionalUnet1D = None  # only needed for the diffusion/NoMaD paths (not lan_only_ft)
 
-from vint_train.models.lelan.lelan import LeLaN_clip, LeLaN_clip_temp, DenseNetwork_lelan
-from vint_train.models.lelan.lelan_comp import LeLaN_clip_FiLM, LeLaN_clip_FiLM_temp
-
-from vint_train.data.vint_dataset import ViNT_Dataset, ViNT_Dataset_fix, ViNT_Dataset_gps, ViNT_ExAug_Dataset
-from vint_train.data.lelan_dataset import LeLaN_Dataset, LeLaN_Dataset_multi
-from vint_train.data.vint_hf_dataset import ViNTLeRobotDataset, ViNTLeRobotDataset_annotate, ViNTDataset_annotate_10k, ViNTLeRobotDataset_IL2, ViNTLeRobotDataset_IL2_gps, ViNTDataset_IL2_gps_10k, ViNTDataset_10k, ViNTDataset_IL2_10k, ViNTLeRobotDataset_IL2_gps_map, ViNTLeRobotDataset_IL2_gps_map_crop, ViNTLeRobotDataset_IL2_gps_map2_crop, ViNTLeRobotDataset_IL2_gps_map_crop_test, EpisodeSampler_IL, EpisodeSampler_annotate, EpisodeSampler_IL_10k, EpisodeSampler_annotate_10k, ViNTDataset_IL2_gps_crop_10k, ViNTLeRobotDataset_IL2_gps_map2_crop_shadow
-#from vint_train.data.frodobot_ft_dataset import Frodobot_FT_Dataset, Frodobot_FT_Dataset_shadow
-from vint_train.data.bdd_dataset import BDD_Dataset_multi
+# --- optional: other model_types / datasets used only by the full multi-modal training.
+#     They pull heavy deps (einops, vit_pytorch, lerobot, zarr, ...) that lan_only_ft does
+#     NOT need, so they are guarded — lan_only_ft imports fine even if these are missing. ---
+try:
+    from vint_train.models.gnm.gnm import GNM
+    from vint_train.models.vint.vint import ViNT
+    from vint_train.models.exaug.exaug import ExAug_dist_delay
+    from vint_train.models.vint.vit import ViT
+    from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
+    from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
+    from vint_train.models.lelan.lelan import LeLaN_clip, LeLaN_clip_temp, DenseNetwork_lelan
+    from vint_train.models.lelan.lelan_comp import LeLaN_clip_FiLM, LeLaN_clip_FiLM_temp
+    from vint_train.data.vint_dataset import ViNT_Dataset, ViNT_Dataset_fix, ViNT_Dataset_gps, ViNT_ExAug_Dataset
+    from vint_train.data.vint_hf_dataset import ViNTLeRobotDataset, ViNTLeRobotDataset_annotate, ViNTDataset_annotate_10k, ViNTLeRobotDataset_IL2, ViNTLeRobotDataset_IL2_gps, ViNTDataset_IL2_gps_10k, ViNTDataset_10k, ViNTDataset_IL2_10k, ViNTLeRobotDataset_IL2_gps_map, ViNTLeRobotDataset_IL2_gps_map_crop, ViNTLeRobotDataset_IL2_gps_map2_crop, ViNTLeRobotDataset_IL2_gps_map_crop_test, EpisodeSampler_IL, EpisodeSampler_annotate, EpisodeSampler_IL_10k, EpisodeSampler_annotate_10k, ViNTDataset_IL2_gps_crop_10k, ViNTLeRobotDataset_IL2_gps_map2_crop_shadow
+    from vint_train.data.bdd_dataset import BDD_Dataset_multi
+except Exception as _opt_e:
+    print(f"[lan_only] optional model/dataset imports skipped ({type(_opt_e).__name__}: {_opt_e})")
 
 from vint_train.training.train_eval_loop import (
     train_eval_loop,

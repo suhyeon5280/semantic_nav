@@ -21,7 +21,10 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
 
 #from transformers import AutoImageProcessor, ZoeDepthForDepthEstimation
-from vint_train.models.depth_360 import Depth_est
+try:
+    from vint_train.models.depth_360 import Depth_est
+except Exception:
+    Depth_est = None  # only used by the depth-based full-training paths (not lan_only_ft)
 #from vint_train.models.ped_est import Ped_est
 #from vint_train.models.pednet import PedNet, unddp_state_dict
 

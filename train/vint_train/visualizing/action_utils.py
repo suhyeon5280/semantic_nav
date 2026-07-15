@@ -3,7 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 from typing import Optional, List
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None  # optional
 import yaml
 import torch
 import torch.nn as nn
