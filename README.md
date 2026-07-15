@@ -102,12 +102,19 @@ LeLaN의 행동 라벨을 **teacher 모델(ExAug/MBRA, NoMaD)로 런타임 생�
 ## 3. 실행 방법
 
 ### 3-1. 환경
+`lan_only_ft` 경로 전용 최소 conda 환경 파일(`environment_frodo_lan.yml`)을 제공합니다:
 ```bash
 # 레포 루트에서
-conda env create -f environment_mbra.yml
-conda activate <env>
-# 누락 패키지 있으면: pip install efficientnet_pytorch openai-clip lmdb diffusers warmup_scheduler prettytable utm
+conda env create -f environment_frodo_lan.yml
+conda activate frodo_lan
 ```
+GPU/CUDA가 안 맞으면 torch만 해당 빌드로 교체:
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # 예: CUDA 12.1
+```
+> 원저자의 전체 환경(`environment_mbra.yml`)은 무거운 데다 원본 전체 학습(diffusion/NoMaD)용이라, 언어 파인튜닝만
+> 할 거면 위의 `environment_frodo_lan.yml`이면 충분합니다. `diffusion_policy`/`map_cache`/`warmup_scheduler`는
+> 코드에서 가드되어 없어도 `lan_only_ft`가 돌아갑니다.
 
 ### 3-2. 체크포인트
 `omnivla-edge.pth`(HF: `NHirose/omnivla-edge`)를 `train/omnivla-edge.pth`에 둡니다. config의

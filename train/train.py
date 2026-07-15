@@ -17,7 +17,10 @@ from torch.utils.data import DataLoader, ConcatDataset
 from torch.optim import Adam, AdamW
 from torchvision import transforms
 import torch.backends.cudnn as cudnn
-from warmup_scheduler import GradualWarmupScheduler
+try:
+    from warmup_scheduler import GradualWarmupScheduler
+except Exception:
+    GradualWarmupScheduler = None  # optional; lan_only_ft falls back to plain cosine if absent
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.optimization import get_scheduler
 
@@ -162,9 +165,12 @@ def main_lan_only_ft(config, device, transform):
     optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=float(config["lr"]))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
     if config.get("warmup", True):
-        scheduler = GradualWarmupScheduler(
-            optimizer, multiplier=1, total_epoch=config.get("warmup_epochs", 2), after_scheduler=scheduler
-        )
+        if GradualWarmupScheduler is not None:
+            scheduler = GradualWarmupScheduler(
+                optimizer, multiplier=1, total_epoch=config.get("warmup_epochs", 2), after_scheduler=scheduler
+            )
+        else:
+            print("[warmup] warmup_scheduler not installed -> using plain cosine (no warmup)")
 
     out = config.get("output_dir", "./logs_frodo_lan_ft")
     os.makedirs(out, exist_ok=True)

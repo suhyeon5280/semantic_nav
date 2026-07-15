@@ -1,0 +1,37 @@
+# Minimal conda env for the language-only fine-tune path (lan_only_ft).
+# Covers exactly the packages train.py / train_utils.py / lelan_dataset.py / il.py import.
+# (diffusion_policy, map_cache, warmup_scheduler are optional and guarded in code.)
+#
+#   conda env create -f environment_frodo_lan.yml
+#   conda activate frodo_lan
+#
+# GPU note: the pip 'torch'/'torchvision' below pull the default CUDA build from PyPI.
+# If it doesn't match your driver, install the matching wheel instead, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+name: frodo_lan
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - numpy
+      - pyyaml
+      - tqdm
+      - pillow
+      - matplotlib
+      - opencv-python
+      - lmdb
+      - prettytable
+      - utm
+      - psutil
+      - wandb
+      - diffusers
+      - ftfy           # CLIP dependency
+      - regex          # CLIP dependency
+      - efficientnet_pytorch
+      - git+https://github.com/openai/CLIP.git        # provides `import clip` (clip.load / clip.tokenize)
+      # optional (enables LR warmup; code falls back to plain cosine if missing):
+      - git+https://github.com/ildoonet/pytorch-gradual-warmup-lr.git
