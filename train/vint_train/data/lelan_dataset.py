@@ -153,31 +153,53 @@ class LeLaN_Dataset(Dataset):
             
     def _load_split_index(self):
         if self.dataset_name == "frodo_lan":
-            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
-            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
-            # No random crop (keep image/trajectory alignment exact).
+            # Custom LeLaN-format data: <root>/episode_XXXX/{image,pickle_nomad}/00000000.{jpg,pkl}
+            # Frames are contiguous within an episode. Both data_image_folder and
+            # data_pickle_folder point to the same <root>; episodes are enumerated below.
+            # Per-position episode bounds (ep_lo/ep_hi) let __getitem__ keep context within
+            # the same episode. No random crop (keep image/trajectory alignment exact).
             self.v_random = 0.0
             self.h_random = 0.0
-            image_path = []
-            pickle_path = []
-            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
-            number_files = len(lst)
-            ratio = 0.9
-            thres = int(number_files * ratio)
+            root_pk = self.data_pickle_folder
+            root_im = self.data_image_folder
+            episodes = sorted(
+                d for d in os.listdir(root_pk)
+                if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
+            )
+            all_img, all_pk, all_ep = [], [], []
+            for ep in episodes:
+                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                im_dir = os.path.join(root_im, ep, "image")
+                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                for st in stems:
+                    ip = os.path.join(im_dir, st + ".jpg")
+                    pp = os.path.join(pk_dir, st + ".pkl")
+                    if os.path.exists(ip):
+                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
+            n = len(all_img)
+            thres = int(n * 0.9)
             if self.data_split_type == "train":
-                print("frodo_lan train frame num", thres)
+                sel = list(range(0, thres))
+                print("frodo_lan train frames", len(sel), "| episodes", episodes)
             else:
-                print("frodo_lan test frame num", number_files - thres)
-            # reserve last 8 frames so the iv+8 goal lookup stays in range
-            for num in range(int(number_files) - 8):
-                if self.data_split_type == "train" and num < thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-                elif self.data_split_type == "test" and num >= thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-            self.image_path = image_path
-            self.pickle_path = pickle_path
+                sel = list(range(thres, n))
+                print("frodo_lan test frames", len(sel))
+            self.image_path = [all_img[i] for i in sel]
+            self.pickle_path = [all_pk[i] for i in sel]
+            ep_sel = [all_ep[i] for i in sel]
+            # per-position inclusive episode bounds within the selected list
+            self.ep_lo = [0] * len(ep_sel)
+            self.ep_hi = [0] * len(ep_sel)
+            a = 0
+            while a < len(ep_sel):
+                b = a
+                while b + 1 < len(ep_sel) and ep_sel[b + 1] == ep_sel[a]:
+                    b += 1
+                for k in range(a, b + 1):
+                    self.ep_lo[k] = a
+                    self.ep_hi[k] = b
+                a = b + 1
+            self.episode_id = ep_sel
             return
 
         if self.dataset_name == "go_stanford4":
@@ -614,31 +636,53 @@ class LeLaN_Dataset_multi(Dataset):
             
     def _load_split_index(self):
         if self.dataset_name == "frodo_lan":
-            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
-            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
-            # No random crop (keep image/trajectory alignment exact).
+            # Custom LeLaN-format data: <root>/episode_XXXX/{image,pickle_nomad}/00000000.{jpg,pkl}
+            # Frames are contiguous within an episode. Both data_image_folder and
+            # data_pickle_folder point to the same <root>; episodes are enumerated below.
+            # Per-position episode bounds (ep_lo/ep_hi) let __getitem__ keep context within
+            # the same episode. No random crop (keep image/trajectory alignment exact).
             self.v_random = 0.0
             self.h_random = 0.0
-            image_path = []
-            pickle_path = []
-            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
-            number_files = len(lst)
-            ratio = 0.9
-            thres = int(number_files * ratio)
+            root_pk = self.data_pickle_folder
+            root_im = self.data_image_folder
+            episodes = sorted(
+                d for d in os.listdir(root_pk)
+                if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
+            )
+            all_img, all_pk, all_ep = [], [], []
+            for ep in episodes:
+                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                im_dir = os.path.join(root_im, ep, "image")
+                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                for st in stems:
+                    ip = os.path.join(im_dir, st + ".jpg")
+                    pp = os.path.join(pk_dir, st + ".pkl")
+                    if os.path.exists(ip):
+                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
+            n = len(all_img)
+            thres = int(n * 0.9)
             if self.data_split_type == "train":
-                print("frodo_lan train frame num", thres)
+                sel = list(range(0, thres))
+                print("frodo_lan train frames", len(sel), "| episodes", episodes)
             else:
-                print("frodo_lan test frame num", number_files - thres)
-            # reserve last 8 frames so the iv+8 goal lookup stays in range
-            for num in range(int(number_files) - 8):
-                if self.data_split_type == "train" and num < thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-                elif self.data_split_type == "test" and num >= thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-            self.image_path = image_path
-            self.pickle_path = pickle_path
+                sel = list(range(thres, n))
+                print("frodo_lan test frames", len(sel))
+            self.image_path = [all_img[i] for i in sel]
+            self.pickle_path = [all_pk[i] for i in sel]
+            ep_sel = [all_ep[i] for i in sel]
+            # per-position inclusive episode bounds within the selected list
+            self.ep_lo = [0] * len(ep_sel)
+            self.ep_hi = [0] * len(ep_sel)
+            a = 0
+            while a < len(ep_sel):
+                b = a
+                while b + 1 < len(ep_sel) and ep_sel[b + 1] == ep_sel[a]:
+                    b += 1
+                for k in range(a, b + 1):
+                    self.ep_lo[k] = a
+                    self.ep_hi[k] = b
+                a = b + 1
+            self.episode_id = ep_sel
             return
 
         if self.dataset_name == "go_stanford4":
@@ -1104,31 +1148,53 @@ class LeLaN_Dataset_multi(Dataset):
             
     def _load_split_index(self):
         if self.dataset_name == "frodo_lan":
-            # Custom LeLaN-format dataset with precomputed `nomad_traj_norm` labels.
-            # Flat layout: <image>/00000000.jpg , <pickle>/00000000.pkl (8-digit, contiguous).
-            # No random crop (keep image/trajectory alignment exact).
+            # Custom LeLaN-format data: <root>/episode_XXXX/{image,pickle_nomad}/00000000.{jpg,pkl}
+            # Frames are contiguous within an episode. Both data_image_folder and
+            # data_pickle_folder point to the same <root>; episodes are enumerated below.
+            # Per-position episode bounds (ep_lo/ep_hi) let __getitem__ keep context within
+            # the same episode. No random crop (keep image/trajectory alignment exact).
             self.v_random = 0.0
             self.h_random = 0.0
-            image_path = []
-            pickle_path = []
-            lst = sorted(f for f in os.listdir(self.data_pickle_folder) if f.endswith(".pkl"))
-            number_files = len(lst)
-            ratio = 0.9
-            thres = int(number_files * ratio)
+            root_pk = self.data_pickle_folder
+            root_im = self.data_image_folder
+            episodes = sorted(
+                d for d in os.listdir(root_pk)
+                if os.path.isdir(os.path.join(root_pk, d, "pickle_nomad"))
+            )
+            all_img, all_pk, all_ep = [], [], []
+            for ep in episodes:
+                pk_dir = os.path.join(root_pk, ep, "pickle_nomad")
+                im_dir = os.path.join(root_im, ep, "image")
+                stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
+                for st in stems:
+                    ip = os.path.join(im_dir, st + ".jpg")
+                    pp = os.path.join(pk_dir, st + ".pkl")
+                    if os.path.exists(ip):
+                        all_img.append(ip); all_pk.append(pp); all_ep.append(ep)
+            n = len(all_img)
+            thres = int(n * 0.9)
             if self.data_split_type == "train":
-                print("frodo_lan train frame num", thres)
+                sel = list(range(0, thres))
+                print("frodo_lan train frames", len(sel), "| episodes", episodes)
             else:
-                print("frodo_lan test frame num", number_files - thres)
-            # reserve last 8 frames so the iv+8 goal lookup stays in range
-            for num in range(int(number_files) - 8):
-                if self.data_split_type == "train" and num < thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-                elif self.data_split_type == "test" and num >= thres:
-                    image_path.append(self.data_image_folder + str(num).zfill(8) + '.jpg')
-                    pickle_path.append(self.data_pickle_folder + str(num).zfill(8) + '.pkl')
-            self.image_path = image_path
-            self.pickle_path = pickle_path
+                sel = list(range(thres, n))
+                print("frodo_lan test frames", len(sel))
+            self.image_path = [all_img[i] for i in sel]
+            self.pickle_path = [all_pk[i] for i in sel]
+            ep_sel = [all_ep[i] for i in sel]
+            # per-position inclusive episode bounds within the selected list
+            self.ep_lo = [0] * len(ep_sel)
+            self.ep_hi = [0] * len(ep_sel)
+            a = 0
+            while a < len(ep_sel):
+                b = a
+                while b + 1 < len(ep_sel) and ep_sel[b + 1] == ep_sel[a]:
+                    b += 1
+                for k in range(a, b + 1):
+                    self.ep_lo[k] = a
+                    self.ep_hi[k] = b
+                a = b + 1
+            self.episode_id = ep_sel
             return
 
         if self.dataset_name == "go_stanford4":
@@ -1494,10 +1560,10 @@ class LeLaN_Dataset_multi(Dataset):
 
     def _getitem_frodo_lan(self, i: int):
         """
-        frodo_lan: custom LeLaN-format data that already contains `nomad_traj_norm`
-        (8,4) = cumulative (x=forward, y=left) waypoints + (cos, sin), normalized by
-        metric_waypoint_spacing. Returns an 11-tuple: the standard LeLaN_Dataset_multi
-        fields PLUS the precomputed trajectory as the last element. No NoMaD needed.
+        frodo_lan: custom LeLaN-format data (episode_*/image + episode_*/pickle_nomad) that
+        already contains `nomad_traj_norm` (8,4). Context (iv-ih) and the +8 goal frame are
+        clamped to stay within the same episode. Returns an 11-tuple (adds nomad_traj_norm).
+        No NoMaD needed.
         """
         iv = i
         objs = self.aug_data_list[iv]
@@ -1509,26 +1575,26 @@ class LeLaN_Dataset_multi(Dataset):
         ir = random.randint(0, len(objs) - 1) if len(objs) > 0 else 0
         obj = objs[ir]
 
-        # images loaded as [3,H,W] in [0,1]; force 224x224 so bbox-space crop is valid
+        lo = self.ep_lo[iv] if hasattr(self, "ep_lo") else 0
+        hi = self.ep_hi[iv] if hasattr(self, "ep_hi") else (len(self.image_path) - 1)
+
+        # images loaded [3,H,W] in [0,1]; force 224x224 so bbox-space crop is valid
         image_fullsize = TF.resize(self._load_image_front(self.image_path[iv]), (224, 224))
         context_image = [image_fullsize]
         for ih in range(1, self.context_size + 1):
             j = iv - ih
-            context_image.append(TF.resize(self._load_image_front(self.image_path[j if j >= 0 else 0]), (224, 224)))
+            if j < lo:
+                j = lo
+            context_image.append(TF.resize(self._load_image_front(self.image_path[j]), (224, 224)))
         image_obs_list = [self._resize_norm(im, self.image_size) for im in context_image]
         image_obs = torch.cat(image_obs_list[::-1])  # oldest -> newest (current last)
 
         cur_image_large = self._resize_norm(image_fullsize, self.image_size_clip)
 
         goal_id = 0
-        try:
-            goal_full = TF.resize(self._load_image_front(self.image_path[iv + goal_id]), (224, 224))
-        except Exception:
-            goal_full = image_fullsize
-        try:
-            goal_full_8 = TF.resize(self._load_image_front(self.image_path[iv + 8]), (224, 224))
-        except Exception:
-            goal_full_8 = image_fullsize
+        gi8 = min(hi, iv + 8)
+        goal_full = image_fullsize                                   # goal_id == 0 -> current frame
+        goal_full_8 = TF.resize(self._load_image_front(self.image_path[gi8]), (224, 224))
         goal_image_full = self._resize_norm(goal_full, self.image_size)
         goal_image_full_8 = self._resize_norm(goal_full_8, self.image_size)
 
@@ -1541,10 +1607,12 @@ class LeLaN_Dataset_multi(Dataset):
             r = min(l + 1, 224)
         image_crop = self._resize_norm(image_fullsize[:, t:b, l:r], self.image_size)
 
-        # prompt (list; each entry may be a 1-tuple like ('asphalt road',))
+        # prompt: (N,1) array / list of tuples / list of str -> unwrap to a single string
         prompts = obj["prompt"]
         p = prompts[random.randint(0, len(prompts) - 1)]
-        inst_obj = p[0] if isinstance(p, (list, tuple)) else p
+        while not isinstance(p, str):
+            p = p[0]
+        inst_obj = p
 
         # object pose in robot frame (forward, left)
         pose_median = np.asarray(obj["pose_median"]).reshape(-1).astype(np.float32)
@@ -1554,9 +1622,7 @@ class LeLaN_Dataset_multi(Dataset):
         # precomputed NoMaD trajectory (8,4): (x=fwd, y=left, cos, sin)
         nomad_traj = np.asarray(obj["nomad_traj_norm"], dtype=np.float32).copy()
 
-        # horizontal-flip augmentation (matches public OmniVLA lelan_dataset.py):
-        # mirror images left<->right, negate lateral(left) of pose, and flip the
-        # trajectory's y (col1) and sin (col3). forward(col0) and cos(col2) unchanged.
+        # horizontal-flip augmentation (matches public OmniVLA lelan_dataset.py)
         if random.random() > 0.5:
             image_obs = torch.flip(image_obs, [2])
             image_crop = torch.flip(image_crop, [2])

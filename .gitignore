@@ -8,3 +8,5 @@ train/vint_train/data/sampler/
 *.pth
 # Fine-tune output dir
 train/logs_frodo_lan_ft/
+# frodo_lan LMDB cache (rebuilt from data)
+omnivla_dataset/_cache/

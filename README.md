@@ -52,43 +52,48 @@ LeLaN의 행동 라벨을 **teacher 모델(ExAug/MBRA, NoMaD)로 런타임 생�
 
 ## 2. 데이터 준비
 
-데이터를 아무 위치(`<DATA_ROOT>`)에나 아래 구조로 저장하면 됩니다. `<DATA_ROOT>`는 당신이 정합니다
-(예: `/home/shy/data`). 4개의 하위 폴더가 config의 4개 경로와 1:1로 매핑됩니다.
+데이터는 **에피소드별 폴더**로 구성됩니다. 데이터 루트(`<DATA_ROOT>`, 예: `omnivla_dataset/`) 아래에
+`episode_XXXX/` 폴더들이 있고, 각 에피소드 안에 `image/`와 `pickle_nomad/`가 있습니다.
 
 ```
-<DATA_ROOT>/frodo_lan/
-├── image/     00000000.jpg, 00000001.jpg, …   # 224×224 RGB, 8자리 zero-pad, 0부터 연속(시간순)
-├── pickle/    00000000.pkl, 00000001.pkl, …   # image와 1:1, 같은 인덱스
-├── train/     (빈 폴더, 쓰기 가능)              # 학습 시 LMDB 캐시가 여기 자동 생성됨
-└── test/      (빈 폴더, 쓰기 가능)              # 마찬가지
+<DATA_ROOT>/                              # 예: omnivla_dataset/
+├── episode_0020/
+│   ├── image/00000000.jpg, 00000001.jpg, …      # 224×224 RGB, 에피소드 내 연속(시간순)
+│   └── pickle_nomad/00000000.pkl, …             # image와 1:1, 같은 stem
+├── episode_0021/
+│   ├── image/ …
+│   └── pickle_nomad/ …
+└── episode_0037/ …
 ```
 
-**폴더 ↔ config 키 매핑** (`config/frodo_lan_ft.yaml`의 `datasets_lan.frodo_lan`):
+**config 키 ↔ 경로 매핑** (`config/frodo_lan_ft.yaml`의 `datasets_lan.frodo_lan`):
 
-| config 키 | 가리켜야 할 폴더 | 내용 |
+| config 키 | 가리켜야 할 것 | 내용 |
 |---|---|---|
-| `image`  | `<DATA_ROOT>/frodo_lan/image/`  | 224×224 jpg들 |
-| `pickle` | `<DATA_ROOT>/frodo_lan/pickle/` | 프레임별 pkl들 |
-| `train`  | `<DATA_ROOT>/frodo_lan/train/`  | 빈 폴더 (train LMDB 캐시 생성 위치) |
-| `test`   | `<DATA_ROOT>/frodo_lan/test/`   | 빈 폴더 (test LMDB 캐시 생성 위치) |
+| `image`  | `<DATA_ROOT>/` (루트)           | 로더가 `episode_*/image/`를 자동 탐색 |
+| `pickle` | `<DATA_ROOT>/` (루트, 같은 값)  | 로더가 `episode_*/pickle_nomad/`를 자동 탐색 |
+| `train`  | 아무 빈 쓰기가능 폴더           | train LMDB 캐시 생성 위치 |
+| `test`   | 아무 빈 쓰기가능 폴더 (train과 다르게) | test LMDB 캐시 생성 위치 |
 
-> 네 경로 모두 **절대경로 + 끝에 `/` 필수**. `image`와 `pickle`은 실제 데이터가 든 폴더, `train`/`test`는
-> 그냥 비어 있는 쓰기 가능 폴더면 됩니다(직접 만들어 두세요: `mkdir -p <DATA_ROOT>/frodo_lan/{train,test}`).
+> `image`와 `pickle`은 **둘 다 데이터 루트(같은 경로)** 를 가리킵니다 — 로더가 그 아래 `episode_*/image`와
+> `episode_*/pickle_nomad`를 알아서 찾습니다. 모두 **절대경로 권장**. `train`/`test`는 그냥 캐시용 빈 폴더
+> (예: `<DATA_ROOT>/_cache/{train,test}/`, 자동 생성해두면 됨).
 
 **규칙**
 - 이미지는 **반드시 224×224**. 로더가 리사이즈하지 않고 bbox/crop이 224 기준(코드에서 안전하게 224로 강제하긴 함).
-- 프레임은 **시간순**(과거 프레임을 context로, 미래 프레임을 goal로 참조).
-- 객체 없는 프레임도 `pickle.dump([], f)`로 pkl 저장(파일 크기 0이면 스킵됨).
-- train/test 폴더는 **비워 둠**. train/test **분할은 로더가 인덱스 비율 90/10으로 자동** 수행(당신이 나눌 필요 없음).
+- 각 에피소드 프레임은 **에피소드 내 연속·시간순**. 로더가 **에피소드 경계를 인식**해 context(`iv-1..iv-5`)를
+  같은 에피소드로 클램프합니다.
+- 객체 없는 프레임도 pkl(빈 리스트) 저장 OK — 로더가 자동으로 건너뜁니다.
+- **train/test 분할은 로더가 전체 프레임의 90/10으로 자동** 수행(당신이 나눌 필요 없음).
 
-**pickle 형식** (프레임당 객체 리스트, 각 원소 dict):
+**pickle 형식** (프레임당 객체 리스트, 각 원소 dict — 우리 데이터 실측 기준):
 ```python
 {
-  "bbox":             np.array([[top, bottom, left, right]]),  # (1,4) int, 224 공간
-  "pose_median":      np.array([[forward, left]]),             # (1,2) float, meters
-  "pose_median_norm": np.array([[forward, left]]) / 0.12,      # (1,2)
-  "nomad_traj_norm":  np.array (8,4) float32,                  # 누적 (x=fwd, y=left, cos, sin), 0.12 정규화
-  "prompt":           ["asphalt road", "paved surface", ...],  # 문자열 리스트
+  "bbox":             np.ndarray (1,4) int,    # [[top, bottom, left, right]], 224 공간
+  "pose_median":      np.ndarray (1,2) float,  # [[forward, left]] meters
+  "pose_median_norm": np.ndarray (1,2) float,  # pose_median / 0.12
+  "nomad_traj_norm":  np.ndarray (8,4) float32,# 누적 (x=fwd, y=left, cos, sin), 0.12 정규화 ← 궤적 라벨
+  "prompt":           np.ndarray (N,1) / list, # 지시문들 (로더가 문자열로 언랩)
 }
 ```
 
@@ -109,31 +114,23 @@ conda activate <env>
 `load_edge_ckpt: ./omnivla-edge.pth`가 `train/` 기준 상대경로이므로, 다른 곳에 두면 그 경로로 바꾸세요.
 
 ### 3-3. ⭐ 데이터 경로 수정 (여기만 고치면 됩니다)
-`train/config/frodo_lan_ft.yaml`을 열면 이 블록이 있습니다:
+`train/config/frodo_lan_ft.yaml`의 `datasets_lan.frodo_lan`에서 `image`/`pickle`은 **데이터 루트**
+(=`episode_*` 폴더들의 상위)로 **둘 다 같은 값**, `train`/`test`는 **캐시용 빈 폴더**로 설정합니다.
+현재 이 레포의 `omnivla_dataset/` 기준으로 이미 아래처럼 채워져 있습니다:
 
 ```yaml
 datasets_lan:
   frodo_lan:
-    # >>> EDIT THESE FOUR PATHS on the machine that has the data (keep trailing '/') <<<
-    train:  /PATH/TO/DATA_ROOT/frodo_lan/train/
-    test:   /PATH/TO/DATA_ROOT/frodo_lan/test/
-    image:  /PATH/TO/DATA_ROOT/frodo_lan/image/
-    pickle: /PATH/TO/DATA_ROOT/frodo_lan/pickle/
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/               # 데이터 루트(episode_* 상위)
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/               # 같은 루트
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/train/  # LMDB 캐시(빈 폴더)
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/test/
 ```
 
-`/PATH/TO/DATA_ROOT`를 **당신의 실제 `<DATA_ROOT>`로 4곳 모두** 바꾸면 됩니다. 예를 들어 데이터를
-`/home/shy/data/frodo_lan/...`에 뒀다면:
+다른 컴퓨터/위치에서 돌리려면 이 4개 경로만 바꾸면 됩니다 — `image`·`pickle`은 항상 **같은 값(데이터 루트)**,
+`train`·`test`는 서로 다른 빈 폴더. 캐시 폴더는 `mkdir -p <루트>/_cache/{train,test}`로 만들어 두세요.
 
-```yaml
-datasets_lan:
-  frodo_lan:
-    train:  /home/shy/data/frodo_lan/train/
-    test:   /home/shy/data/frodo_lan/test/
-    image:  /home/shy/data/frodo_lan/image/
-    pickle: /home/shy/data/frodo_lan/pickle/
-```
-
-> 주의: **끝에 `/` 반드시** 포함. 이 4줄 + (필요 시) `load_edge_ckpt` 외에는 건드릴 필요 없습니다.
+> 이 4줄 + (필요 시) `load_edge_ckpt` 외에는 건드릴 필요 없습니다.
 
 ### 3-4. 실행
 ```bash

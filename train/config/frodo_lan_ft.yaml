@@ -37,11 +37,12 @@ context_type: temporal
 
 datasets_lan:
   frodo_lan:
-    # >>> EDIT THESE FOUR PATHS on the machine that has the data (keep trailing '/') <<<
-    train:  /PATH/TO/DATA_ROOT/frodo_lan/train/
-    test:   /PATH/TO/DATA_ROOT/frodo_lan/test/
-    image:  /PATH/TO/DATA_ROOT/frodo_lan/image/
-    pickle: /PATH/TO/DATA_ROOT/frodo_lan/pickle/
+    # Data root holds episode_XXXX/{image,pickle_nomad}/ . image & pickle both point to the root;
+    # train/test are just writable dirs where the LMDB cache is created (auto 90/10 split).
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/train/
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/test/
     backside: False
     aug_seq: False
     only_front: True
