@@ -12,3 +12,5 @@ train/logs_frodo_lan_ft/
 omnivla_dataset/_cache/
 # Raw dataset (do not commit ~32MB of images/pkl)
 omnivla_dataset/
+# generated visualization PNGs
+train/eval_*.png
