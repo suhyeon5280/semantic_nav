@@ -90,6 +90,9 @@ def main():
     ap.add_argument("--episode", default=None, help="restrict samples to this episode folder")
     ap.add_argument("--n", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--split", choices=["test", "train", "all"], default="test",
+                    help="which split to sample the evaluated frames from "
+                         "(default: test = held-out only, NO training-data leakage)")
     ap.add_argument("--out", default=None, help="output PNG (default: eval/results/visualize_traj/<timestamp>/traj.png)")
     args = ap.parse_args()
 
@@ -105,10 +108,32 @@ def main():
     base_path = args.base or cfg["load_edge_ckpt"]
     ft_paths = args.ft or ["logs_frodo_lan_ft/best.pth"]
 
-    # ---- gather candidate (episode, frame_idx, obj) with a non-surface object ----
-    eps = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d, "pickle_nomad")))
-    if args.episode:
-        eps = [args.episode]
+    # ---- determine the train/test split EXACTLY like LeLaN_Dataset_multi._load_split_index ----
+    # so the frames we EVALUATE on are held-out (no training-data leakage in the plots).
+    split_by_episode = bool(cfg.get("split_by_episode", False))
+    all_eps = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d, "pickle_nomad")))
+    all_frames = []  # global (episode-sorted, stem-sorted, image-exists) order == dataset _gather order
+    for ep in all_eps:
+        pk_dir = os.path.join(root, ep, "pickle_nomad")
+        im_dir = os.path.join(root, ep, "image")
+        for st in sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl")):
+            if os.path.exists(os.path.join(im_dir, st + ".jpg")):
+                all_frames.append((ep, st))
+    if args.split == "all":
+        allowed = set(all_frames)
+    elif split_by_episode:
+        n_test_ep = max(1, int(round(len(all_eps) * 0.1)))
+        test_eps = set(all_eps[-n_test_ep:])
+        allowed = set((ep, st) for (ep, st) in all_frames if (ep in test_eps) == (args.split == "test"))
+    else:
+        thres = int(len(all_frames) * 0.9)                     # 90/10 index split
+        sel = all_frames[thres:] if args.split == "test" else all_frames[:thres]
+        allowed = set(sel)
+    print(f"[split] {args.split} | mode={'episode' if split_by_episode else 'index'} "
+          f"| {len(allowed)}/{len(all_frames)} eligible frames")
+
+    # ---- gather candidate (episode, frame_idx, obj) whose CENTER frame is in the chosen split ----
+    eps = [args.episode] if args.episode else all_eps
     cands = []
     for ep in eps:
         pk_dir = os.path.join(root, ep, "pickle_nomad")
@@ -116,6 +141,8 @@ def main():
         stems = sorted(f[:-4] for f in os.listdir(pk_dir) if f.endswith(".pkl"))
         idx = {s: k for k, s in enumerate(stems)}
         for s in stems:
+            if (ep, s) not in allowed:                          # only evaluate on split frames
+                continue
             if not os.path.exists(os.path.join(im_dir, s + ".jpg")):
                 continue
             objs = __import__("pickle").load(open(os.path.join(pk_dir, s + ".pkl"), "rb"))
@@ -127,7 +154,7 @@ def main():
                 break  # one object per frame is enough
     random.shuffle(cands)
     cands = cands[:args.n]
-    print(f"{len(cands)} samples from {len(eps)} episode(s)")
+    print(f"{len(cands)} samples from {len({c[0] for c in cands})} episode(s) [{args.split} split]")
 
     import pickle as pk
     scenes, bboxes, prompts, gts, objposes = [], [], [], [], []
