@@ -115,7 +115,12 @@ def main_lan_only_ft(config, device, transform):
     #   False -> 90/10 by frame index (small data: keeps almost all frames for training)
     #   True  -> hold out whole episodes as test (large data: trustworthy, no leakage)
     LeLaN_Dataset_multi.split_by_episode = bool(config.get("split_by_episode", False))
-    print(f"[split] {'episode-level (hold out whole episodes)' if LeLaN_Dataset_multi.split_by_episode else 'index-level 90/10'}")
+    LeLaN_Dataset_multi.test_episodes = config.get("test_episodes", None)
+    if LeLaN_Dataset_multi.split_by_episode:
+        _te = LeLaN_Dataset_multi.test_episodes
+        print(f"[split] episode-level hold-out | test episodes = {_te if _te else 'last 10%'}")
+    else:
+        print("[split] index-level 90/10")
 
     os.makedirs(dc["train"], exist_ok=True)   # LMDB cache dirs (create if missing)
     os.makedirs(dc["test"], exist_ok=True)

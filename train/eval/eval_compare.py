@@ -87,6 +87,7 @@ if __name__ == "__main__":
     dc = cfg["datasets_lan"]["frodo_lan"]
     # match training: same split strategy + prompt filter
     LeLaN_Dataset_multi.split_by_episode = bool(cfg.get("split_by_episode", False))
+    LeLaN_Dataset_multi.test_episodes = cfg.get("test_episodes", None)
     _default_bl = ["asphalt", "road", "roads", "roadway", "roadways", "pavement", "paved", "tarmac",
                    "ground", "floor", "surface", "sidewalk", "gravel", "dirt", "lane", "lanes",
                    "path", "pathway", "drop", "mud", "cobblestone"]

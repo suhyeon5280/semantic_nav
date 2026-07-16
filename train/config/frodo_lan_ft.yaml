@@ -73,7 +73,9 @@ lr: 2e-5                               # low LR: strong base prior + tiny data
 optimizer: adamw
 scheduler: "cosine"
 freeze_backbone: True                  # freeze obs/goal/goal_img EfficientNet encoders
-split_by_episode: False                # small data: 90/10 by frame index (keep most frames for training)
+split_by_episode: True                 # episode-level hold-out: clean generalization test (no leakage)
+test_episodes: [episode_0020]          # hold these episode(s) out as test; train on all the rest
+                                       # (set split_by_episode False to fall back to 90/10 index split)
 warmup: True
 warmup_epochs: 2
 early_stop_patience: 3                 # stop if test_action_loss doesn't improve for N epochs

@@ -122,8 +122,12 @@ def main():
     if args.split == "all":
         allowed = set(all_frames)
     elif split_by_episode:
-        n_test_ep = max(1, int(round(len(all_eps) * 0.1)))
-        test_eps = set(all_eps[-n_test_ep:])
+        forced = cfg.get("test_episodes")
+        if forced:
+            test_eps = set(forced)
+        else:
+            n_test_ep = max(1, int(round(len(all_eps) * 0.1)))
+            test_eps = set(all_eps[-n_test_ep:])
         allowed = set((ep, st) for (ep, st) in all_frames if (ep in test_eps) == (args.split == "test"))
     else:
         thres = int(len(all_frames) * 0.9)                     # 90/10 index split

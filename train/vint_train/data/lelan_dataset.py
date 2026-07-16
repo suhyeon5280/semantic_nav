@@ -187,9 +187,14 @@ class LeLaN_Dataset(Dataset):
                 return imgs, pks, eids
 
             if getattr(self, "split_by_episode", False):
-                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
-                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
-                test_eps = set(episodes[-n_test_ep:])
+                # Hold out whole episodes as test (no train/test leakage). If test_episodes is
+                # given, hold out exactly those; otherwise default to the last round(10%) episodes.
+                forced = getattr(self, "test_episodes", None)
+                if forced:
+                    test_eps = set(forced)
+                else:
+                    n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                    test_eps = set(episodes[-n_test_ep:])
                 sel_eps = ([e for e in episodes if e not in test_eps]
                            if self.data_split_type == "train"
                            else [e for e in episodes if e in test_eps])
@@ -690,9 +695,14 @@ class LeLaN_Dataset_multi(Dataset):
                 return imgs, pks, eids
 
             if getattr(self, "split_by_episode", False):
-                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
-                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
-                test_eps = set(episodes[-n_test_ep:])
+                # Hold out whole episodes as test (no train/test leakage). If test_episodes is
+                # given, hold out exactly those; otherwise default to the last round(10%) episodes.
+                forced = getattr(self, "test_episodes", None)
+                if forced:
+                    test_eps = set(forced)
+                else:
+                    n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                    test_eps = set(episodes[-n_test_ep:])
                 sel_eps = ([e for e in episodes if e not in test_eps]
                            if self.data_split_type == "train"
                            else [e for e in episodes if e in test_eps])
@@ -1222,9 +1232,14 @@ class LeLaN_Dataset_multi(Dataset):
                 return imgs, pks, eids
 
             if getattr(self, "split_by_episode", False):
-                # LARGE-data split: hold out whole episodes as test (no train/test leakage)
-                n_test_ep = max(1, int(round(len(episodes) * 0.1)))
-                test_eps = set(episodes[-n_test_ep:])
+                # Hold out whole episodes as test (no train/test leakage). If test_episodes is
+                # given, hold out exactly those; otherwise default to the last round(10%) episodes.
+                forced = getattr(self, "test_episodes", None)
+                if forced:
+                    test_eps = set(forced)
+                else:
+                    n_test_ep = max(1, int(round(len(episodes) * 0.1)))
+                    test_eps = set(episodes[-n_test_ep:])
                 sel_eps = ([e for e in episodes if e not in test_eps]
                            if self.data_split_type == "train"
                            else [e for e in episodes if e in test_eps])
