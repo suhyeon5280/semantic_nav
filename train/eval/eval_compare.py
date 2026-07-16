@@ -1,18 +1,29 @@
 """
-Compare the base OmniVLA-edge checkpoint vs a fine-tuned checkpoint on the frodo_lan test split.
-
-Usage (from train/):
-    python eval_compare.py                                  # base=config load_edge_ckpt, ft=logs_frodo_lan_ft/best.pth
-    python eval_compare.py --ft ./logs_frodo_lan_ft/latest.pth
-    python eval_compare.py -c config/frodo_lan_ft.yaml --base ./omnivla-edge.pth --ft ./logs_frodo_lan_ft/best.pth
+=== EVAL TOOL 1/3: eval_compare.py — quantitative metrics on the TEST split ===
+The three eval tools under train/eval/ each do a DIFFERENT job:
+  - eval_compare.py (THIS) : QUANTITATIVE. Runs base AND a fine-tuned checkpoint over the
+                        frodo_lan TEST split and prints a side-by-side metric table
+                        (action_mse, waypoint/endpoint/object error in meters, heading_cos)
+                        plus an image-goal base-divergence number. Answers "how much better?"
+  - visualize_traj.py : QUALITATIVE. Overlays GT / base / fine-tuned paths on dataset samples.
+  - infer.py          : DEPLOYMENT. Runs on ARBITRARY images + a prompt; no dataset needed.
 
 Reports, on the held-out test split:
   * language-goal (mask 7) metrics for BOTH models, side by side, with delta
   * a basic-driving regression number: image-goal (mask 6) divergence between the two models
 No training data / teachers needed. Neither checkpoint file is modified.
+
+Usage (run from train/):
+    python eval/eval_compare.py                                 # base vs logs_frodo_lan_ft/best.pth
+    python eval/eval_compare.py --ft ./logs_frodo_lan_ft/2026_.../best.pth
+    python eval/eval_compare.py -c config/frodo_lan_ft.yaml --base ./omnivla-edge.pth --ft ...
+
+Results (the printed table) are also saved to train/eval/results/eval_compare/<timestamp>/metrics.txt .
 """
 import argparse
 import os
+import sys
+import time
 import yaml
 
 import torch
@@ -20,9 +31,21 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 import clip
 
+# --- this file lives in train/eval/; make imports + relative paths behave as if run from train/ ---
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TRAIN = os.path.dirname(_HERE)
+if _TRAIN not in sys.path:
+    sys.path.insert(0, _TRAIN)
+os.chdir(_TRAIN)
 from vint_train.models.il.il import IL_gps_map_mask3_lan2
 from vint_train.data.lelan_dataset import LeLaN_Dataset_multi
 from vint_train.training.train_utils import eval_metrics_lan, evaluate_lan_only_ft
+
+
+def _result_dir(tool):
+    d = os.path.join(_HERE, "results", tool, time.strftime("%Y_%m_%d_%H_%M_%S"))
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def build_model(c):
@@ -91,22 +114,35 @@ if __name__ == "__main__":
     print("Loading fine-tuned :", args.ft)
     ft = load_into(build_model(cfg), args.ft, device)
 
-    print("\n=== Language-goal (mask 7) metrics on frodo_lan TEST split ===")
+    # tee: everything appended to `report` is both printed and written to metrics.txt
+    report = []
+    def out(s=""):
+        print(s)
+        report.append(str(s))
+
+    out(f"base       : {base_path}")
+    out(f"fine-tuned : {args.ft}")
+    out("\n=== Language-goal (mask 7) metrics on frodo_lan TEST split ===")
     mb = eval_metrics_lan(base, text_encoder, loader, transform, device, goal_mask_value=7)
     mf = eval_metrics_lan(ft, text_encoder, loader, transform, device, goal_mask_value=7)
     better = {
         "action_mse": "lower", "waypoint_err_m": "lower", "endpoint_err_m": "lower",
         "object_err_m": "lower", "heading_cos": "higher",
     }
-    print(f"{'metric':16s} {'base':>12s} {'finetuned':>12s} {'delta':>12s}   better")
+    out(f"{'metric':16s} {'base':>12s} {'finetuned':>12s} {'delta':>12s}   better")
     for k in ["action_mse", "waypoint_err_m", "endpoint_err_m", "object_err_m", "heading_cos"]:
         delta = mf[k] - mb[k]
         improved = (delta < 0) if better[k] == "lower" else (delta > 0)
         mark = "  <-- improved" if improved else ""
-        print(f"{k:16s} {mb[k]:12.4f} {mf[k]:12.4f} {delta:+12.4f}   ({better[k]}){mark}")
-    print(f"(test samples = {mb['n']})")
+        out(f"{k:16s} {mb[k]:12.4f} {mf[k]:12.4f} {delta:+12.4f}   ({better[k]}){mark}")
+    out(f"(test samples = {mb['n']})")
 
-    print("\n=== Basic-driving regression: image-goal (mask 6) divergence, base vs fine-tuned ===")
+    out("\n=== Basic-driving regression: image-goal (mask 6) divergence, base vs fine-tuned ===")
     div = evaluate_lan_only_ft(ft, base, text_encoder, loader, transform, device)
-    print(f"  base_divergence(image-goal) = {div['base_divergence_imagegoal']:.4f}")
-    print("  (~0 = image-goal driving preserved; large = fine-tune shifted basic driving)")
+    out(f"  base_divergence(image-goal) = {div['base_divergence_imagegoal']:.4f}")
+    out("  (~0 = image-goal driving preserved; large = fine-tune shifted basic driving)")
+
+    rdir = _result_dir("eval_compare")
+    with open(os.path.join(rdir, "metrics.txt"), "w") as fh:
+        fh.write("\n".join(report) + "\n")
+    print("\nresult dir:", rdir)

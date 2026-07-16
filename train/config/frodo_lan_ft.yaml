@@ -15,9 +15,9 @@ run_name: frodo_lan_ft
 lan_only_ft: True                      # uses the trimmed frodo_lan pipeline (main_lan_only_ft)
 
 # --- multi-modal (image-goal) settings ---
-use_image_goal: True                   # also train image-goal (mask 6) via MBRA teacher
+use_image_goal: False                   # also train image-goal (mask 6) via MBRA teacher
 load_mbra: ./mbra.pth                   # MBRA (ExAug_dist_delay) teacher weights (HF NHirose/MBRA)
-# base_divergence_max:                 # base-driving cap; IGNORED while use_image_goal is True.
+base_divergence_max: 0.5                # base-driving cap; IGNORED while use_image_goal is True.
                                        # Only enable (e.g. 0.5) if you set use_image_goal: False.
 
 # --- checkpoint to fine-tune (already in the repo) + output dir ---

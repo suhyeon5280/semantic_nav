@@ -16,3 +16,6 @@ omnivla_dataset/
 # generated visualization PNGs
 train/eval_*.png
 train/infer_*.png
+# eval tool outputs (train/eval/): result folders + any loose PNGs (do not commit)
+train/eval/results/
+train/eval/*.png

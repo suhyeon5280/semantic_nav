@@ -10099,7 +10099,7 @@ def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transf
 
 
 @torch.no_grad()
-def eval_metrics_lan(model, text_encoder, dataloader_lan, transform, device, goal_mask_value=7, mws=0.12):
+def eval_metrics_lan(model, text_encoder, dataloader_lan, transform, device, goal_mask_value=7, mws=0.125):
     """
     Detailed language-goal (default mask 7) metrics on a loader, for base-vs-finetuned comparison.
       action_mse      : MSE over the full (8,4) trajectory vs the dataset nomad_traj_norm (lower better)

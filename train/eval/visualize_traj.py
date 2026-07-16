@@ -1,16 +1,25 @@
 """
-Visualize language-goal trajectories: scene image (+ object bbox + prompt) alongside a
-bird's-eye plot of GT vs base vs fine-tuned predicted paths.
+=== EVAL TOOL 2/3: visualize_traj.py — qualitative trajectory plots on DATASET samples ===
+The three eval tools under train/eval/ each do a DIFFERENT job:
+  - eval_compare.py   : QUANTITATIVE. Numeric metric table (base vs fine-tuned) on the
+                        frodo_lan TEST split. Answers "how much better, in numbers?"
+  - visualize_traj.py (THIS) : QUALITATIVE. For N sampled dataset frames, draws the scene
+                        (+ object bbox + prompt) next to a bird's-eye plot overlaying
+                        GT vs base vs one-or-more fine-tuned predicted paths. Answers
+                        "what do the paths actually look like vs GT / the object?"
+  - infer.py          : DEPLOYMENT. Runs on ARBITRARY images + a prompt; no dataset needed.
 
 Self-contained: reads pickles/images directly, does NOT modify or depend on the dataset class.
 
-Usage (from train/):
-    python visualize_traj.py                                   # base vs logs_frodo_lan_ft/best.pth
-    python visualize_traj.py --ft logs_frodo_lan_ft/2026_.../best.pth
-    python visualize_traj.py --ft A/best.pth --ft B/best.pth --n 4 --out compare.png
-    python visualize_traj.py --episode episode_0037 --n 6
+Usage (run from train/):
+    python eval/visualize_traj.py                                 # base vs logs_frodo_lan_ft/best.pth
+    python eval/visualize_traj.py --ft logs_frodo_lan_ft/2026_.../best.pth
+    python eval/visualize_traj.py --ft A/best.pth --ft B/best.pth --n 4   # overlay several runs
+    python eval/visualize_traj.py --episode episode_0037 --n 6
+
+Results are saved under train/eval/results/visualize_traj/<timestamp>/traj.png .
 """
-import argparse, os, glob, re, random, yaml
+import argparse, os, sys, glob, re, random, time, yaml
 import numpy as np
 from PIL import Image
 
@@ -23,9 +32,22 @@ import torch
 import torchvision.transforms.functional as TF
 from torchvision import transforms
 import clip
+
+# --- this file lives in train/eval/; make imports + relative paths behave as if run from train/ ---
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TRAIN = os.path.dirname(_HERE)
+if _TRAIN not in sys.path:
+    sys.path.insert(0, _TRAIN)
+os.chdir(_TRAIN)
 from vint_train.models.il.il import IL_gps_map_mask3_lan2
 
 IMG = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
+
+def _result_dir(tool):
+    d = os.path.join(_HERE, "results", tool, time.strftime("%Y_%m_%d_%H_%M_%S"))
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def prompt_text(p):
@@ -68,12 +90,13 @@ def main():
     ap.add_argument("--episode", default=None, help="restrict samples to this episode folder")
     ap.add_argument("--n", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default="eval_traj_scene.png")
+    ap.add_argument("--out", default=None, help="output PNG (default: eval/results/visualize_traj/<timestamp>/traj.png)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open("config/defaults.yaml")); cfg.update(yaml.safe_load(open(args.config)))
     root = cfg["datasets_lan"]["frodo_lan"]["pickle"]
-    mws = yaml.safe_load(open("vint_train/data/data_config.yaml")).get("frodo_lan", {}).get("metric_waypoint_spacing", 0.12)
+    # frodo_lan has no entry in data_config.yaml -> fall back to 0.125 (matches training normalization)
+    mws = yaml.safe_load(open("vint_train/data/data_config.yaml")).get("frodo_lan", {}).get("metric_waypoint_spacing", 0.125)
     bl = set(w.lower() for w in cfg.get("prompt_blocklist", []))
     cs = cfg["context_size"]; H = cfg["image_size"][0]
     dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -143,7 +166,12 @@ def main():
 
     runs = {"base": base_path}
     for i, p in enumerate(ft_paths):
-        runs[f"ft{i+1}" if len(ft_paths) > 1 else "fine-tuned"] = p
+        # label each fine-tuned run by its timestamp folder (HH_MM_SS) when present,
+        # so multiple runs are distinguishable in the legend
+        parent = os.path.basename(os.path.dirname(p))
+        m_ts = re.match(r"\d{4}_\d{2}_\d{2}_(\d{2}_\d{2}_\d{2})", parent)
+        lbl = m_ts.group(1) if m_ts else (f"ft{i+1}" if len(ft_paths) > 1 else "fine-tuned")
+        runs[lbl] = p
     preds = {}
     for name, p in runs.items():
         m = load_ckpt(p, cfg, dev)
@@ -153,7 +181,7 @@ def main():
         print(f"loaded {name}: {p}")
 
     # ---- plot: N rows x 2 cols (scene | trajectory) ----
-    colors = ["#9aa0a6", "#4E79A7", "#F28E2B", "#59A14F", "#B07AA1"]
+    colors = ["#9aa0a6", "#4E79A7", "#F28E2B", "#59A14F", "#B07AA1", "#E15759", "#76B7B2", "#EDC948"]
     fig, axes = plt.subplots(B, 2, figsize=(9, 3.6 * B), dpi=130, squeeze=False)
     for r in range(B):
         axs, axt = axes[r, 0], axes[r, 1]
@@ -176,8 +204,11 @@ def main():
             axt.legend(fontsize=8, loc="best")
     fig.suptitle("Scene + object (red box) vs predicted trajectories (language goal)", fontsize=12)
     fig.tight_layout()
-    fig.savefig(args.out, bbox_inches="tight")
-    print("saved:", args.out)
+
+    rdir = _result_dir("visualize_traj")
+    out_png = args.out or os.path.join(rdir, "traj.png")
+    fig.savefig(out_png, bbox_inches="tight")
+    print("saved:", out_png, "| result dir:", rdir)
 
 
 if __name__ == "__main__":
