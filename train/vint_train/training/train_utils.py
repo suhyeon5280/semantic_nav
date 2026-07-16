@@ -9956,8 +9956,11 @@ def train_lan_only_ft(
             ).to(device)
 
             # ----- goal modality mask: 7 = language-only, 8 = language + gps -----
+            # 7 = language-only, 8 = language + object-position. Match LeLaN's ~75/25 ratio
+            # (mask 7 dominant): our object position is noisy model-inferred depth, so we keep
+            # the position token a minority cue and force the model to ground on language+vision.
             goal_mask_lan = torch.tensor(
-                [random.choice([7, 8]) for _ in range(Blan)], dtype=torch.long
+                [random.choice([7, 7, 7, 8]) for _ in range(Blan)], dtype=torch.long
             ).to(device)
 
             action_pred, dist_pred, mask_number = model(
@@ -10217,7 +10220,9 @@ def train_multimodal_ft(
             gid = distance_lan.to(device)                       # 0 -> lang/pos, >0 -> image-goal
             gmask = []
             for k in range(B):
-                gmask.append(6 if gid[k] != 0 else random.choice([7, 8]))
+                # language samples: ~75/25 mask 7 (language-only) vs 8 (language + noisy-depth
+                # position), matching LeLaN and limiting reliance on the noisy position cue
+                gmask.append(6 if gid[k] != 0 else random.choice([7, 7, 7, 8]))
             goal_mask_lan = torch.tensor(gmask, dtype=torch.long, device=device)
             m_img = (gid != 0).float().view(-1, 1, 1).repeat(1, 8, 4)
             action_ref = (1.0 - m_img) * nomad_traj_lan.to(device) + m_img * action_mbra.detach()
