@@ -50,7 +50,9 @@ context_type: temporal
 # as surface; an object is used only if it has >=1 non-surface prompt. Set to [] to disable.
 prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
                    ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
-                   path, pathway, drop, mud, cobblestone]
+                   path, pathway, drop, mud, cobblestone, area]
+                   # "area" filters region/surface prompts (roadway/driveway/ground/concrete area, ...)
+                   # that aren't discrete navigation targets. Verified: all 92 "area" prompts are surfaces.
 
 datasets_lan:
   frodo_lan:

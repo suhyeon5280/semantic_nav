@@ -49,7 +49,8 @@ context_type: temporal
 # Prompt filter (same as small-data preset). Set to [] to disable.
 prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
                    ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
-                   path, pathway, drop, mud, cobblestone]
+                   path, pathway, drop, mud, cobblestone, area]
+                   # "area" filters region/surface prompts (roadway/driveway/ground/concrete area, ...)
 
 datasets_lan:
   frodo_lan:

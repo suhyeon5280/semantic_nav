@@ -90,7 +90,7 @@ if __name__ == "__main__":
     LeLaN_Dataset_multi.test_episodes = cfg.get("test_episodes", None)
     _default_bl = ["asphalt", "road", "roads", "roadway", "roadways", "pavement", "paved", "tarmac",
                    "ground", "floor", "surface", "sidewalk", "gravel", "dirt", "lane", "lanes",
-                   "path", "pathway", "drop", "mud", "cobblestone"]
+                   "path", "pathway", "drop", "mud", "cobblestone", "area"]
     _blocklist = set(w.lower() for w in cfg.get("prompt_blocklist", _default_bl))
     print(f"[eval] split={'episode' if LeLaN_Dataset_multi.split_by_episode else 'index'} "
           f"| prompt-filter {'ON' if _blocklist else 'off'}")
