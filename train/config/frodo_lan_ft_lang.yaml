@@ -14,13 +14,17 @@ lan_only_ft: True                      # trimmed frodo_lan pipeline (main_lan_on
 
 # --- language augmentation (this pipeline's switch) ---
 lang_aug_ft: True                      # route to train_lan_aug_ft (direction + diverse phrasing)
-dir_frac: 0.3                          # fraction of each batch turned into direction counterfactuals
-warp_bend: 1.6                         # endpoint lateral warp (normalized units) for left/right
+# contrastive direction task: dir_k observations x {left,right,straight}, lateral = command-driven
+dir_weight: 1.0                        # weight of the direction loss vs object-nav loss
+dir_k: 8                               # observations per step expanded x3 for the contrastive task
+warp_bend: 4.0                         # command-driven endpoint lateral (normalized units)
 
 # --- image-goal off (language + direction only) ---
 use_image_goal: False
 load_mbra: ./mbra.pth
-base_divergence_max: 0.5               # base-driving cap (image-goal divergence)
+# base_divergence_max: 0.5             # cap OFF for direction training: warping the decoder for
+                                       # direction legitimately raises image-goal divergence, so the
+                                       # cap would wrongly cut off learning. heading_cos early-stop still guards.
 
 # --- checkpoint + output ---
 load_edge_ckpt: ./omnivla-edge.pth

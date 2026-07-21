@@ -281,7 +281,8 @@ def main_lan_only_ft(config, device, transform):
                 project_folder=out, epoch=epoch,
                 print_log_freq=config.get("print_log_freq", 20),
                 use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
-                dir_frac=config.get("dir_frac", 0.3), warp_bend=config.get("warp_bend", 1.6),
+                dir_weight=config.get("dir_weight", 1.0), dir_k=config.get("dir_k", 8),
+                warp_bend=config.get("warp_bend", 4.0),
             )
         else:
             train_lan_only_ft(
