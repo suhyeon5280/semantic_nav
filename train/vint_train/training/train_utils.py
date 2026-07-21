@@ -10020,6 +10020,100 @@ def train_lan_only_ft(
                     )
 
 
+def train_lan_aug_ft(
+    model, text_encoder, optimizer, dataloader_lan, transform, device,
+    project_folder, epoch, print_log_freq=20, use_wandb=False, freeze_backbone=False,
+    dir_frac=0.3, warp_bend=1.6,
+):
+    """
+    Language-augmented fine-tune: same as train_lan_only_ft (object-nav from precomputed
+    nomad_traj_norm) but a `dir_frac` fraction of each batch is turned into DIRECTION
+    counterfactuals — the real trajectory is warped left/right/straight (lang_aug.warp_trajectory)
+    and the prompt is replaced by a diverse phrasing of that direction (lang_aug.PHRASINGS_TRAIN).
+    This teaches command->direction (which real data can't) and, via phrasing diversity, aims for
+    OOD-robust instruction following. Object samples keep their obj_loss; direction samples don't.
+    """
+    import random as _random
+    from vint_train.data.lang_aug import warp_trajectory, sample_phrasing, DIRECTIONS
+
+    model.train()
+    if freeze_backbone:
+        model.obs_encoder.eval(); model.goal_encoder.eval(); model.goal_encoder_img.eval()
+    text_encoder.eval().to(device)
+
+    tot = Logger("total_loss", "train", window_size=print_log_freq)
+    act = Logger("action_loss", "train", window_size=print_log_freq)
+    dl = Logger("dir_frac", "train", window_size=print_log_freq)
+    with tqdm.tqdm(dataloader_lan, desc=f"lan-aug ep{epoch}", leave=False) as tepoch:
+        for i, data in enumerate(tepoch):
+            (obs_images_lan, goal_image_lan, cur_large_img_lan, goal_pos_lan, obj_inst_lan,
+             goal_pos_norm_lan, goal_image_full_lan, goal_image_full_8_lan, distance_lan,
+             action_mask_lan, nomad_traj_lan) = data
+            Blan = obs_images_lan.shape[0]
+
+            ol = torch.split(obs_images_lan, 3, dim=1)
+            obs_map = ol[-1].to(device)
+            obs_t = torch.cat([transform(x).to(device) for x in ol], dim=1)
+            z = torch.zeros(Blan, 3, 96, 96)
+            map_t = torch.cat((transform(z).to(device), transform(z).to(device), obs_map), axis=1)
+            goal_img = transform(goal_image_full_lan).to(device)
+            cur_large = transform(cur_large_img_lan).to(device)
+
+            # object prompts -> CLIP features
+            tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
+            with torch.no_grad():
+                feat = text_encoder.encode_text(tokens).clone()
+
+            gp = goal_pos_lan.to(device)
+            dis = torch.sqrt(gp[:, 1:2] ** 2 + gp[:, 0:1] ** 2) + 1e-6
+            goal_pose = torch.cat((gp[:, 1:2], -gp[:, 0:1], gp[:, 1:2] / dis, -gp[:, 0:1] / dis), axis=1).to(device)
+            goal_mask = torch.tensor([_random.choice([7, 7, 7, 8]) for _ in range(Blan)], dtype=torch.long, device=device)
+            action_label = nomad_traj_lan.to(device).clone()
+
+            # ---- direction counterfactual augmentation on a dir_frac fraction ----
+            is_dir = [(_random.random() < dir_frac) for _ in range(Blan)]
+            dir_idx = [k for k in range(Blan) if is_dir[k]]
+            if dir_idx:
+                phr = []
+                for k in dir_idx:
+                    d = _random.choice(DIRECTIONS)
+                    action_label[k] = warp_trajectory(action_label[k], d, warp_bend)  # warp real traj
+                    goal_mask[k] = 7                                                    # language-only
+                    phr.append(sample_phrasing(d, _random, ood=False))                 # diverse phrasing
+                with torch.no_grad():
+                    dfeat = text_encoder.encode_text(clip.tokenize(phr, truncate=True).to(device))
+                for j, k in enumerate(dir_idx):
+                    feat[k] = dfeat[j]
+
+            action_pred, dist_pred, _ = model(obs_t, goal_pose, map_t, goal_img, goal_mask, feat, cur_large)
+
+            # obj_loss only for OBJECT language samples (not direction counterfactuals)
+            is_dir_t = torch.tensor(is_dir, device=device)
+            mask_obj = ((goal_mask == 7) | (goal_mask == 8)) & (~is_dir_t)
+            tar_obj = gp / 0.125
+            if mask_obj.any():
+                pol, pop = tar_obj[mask_obj], action_pred[:, -1, 0:2][mask_obj]
+            else:  # no object sample this batch -> make obj_loss a no-op (0)
+                pol = action_pred[:, -1, 0:2][:1].detach(); pop = action_pred[:, -1, 0:2][:1]
+
+            losses = _compute_losses_lan(
+                dist_label=distance_lan.float().to(device),
+                action_label=action_label, dist_pred=dist_pred, action_pred=action_pred,
+                pose_obj_label=pol, pose_obj_pred=pop,
+                alpha=0.5, learn_angle=True, image_solo=False, sate_solo=False,
+                action_mask=action_mask_lan.float().to(device),
+            )
+            optimizer.zero_grad(); losses["total_loss"].backward(); optimizer.step()
+
+            tot.log_data(losses["total_loss"].item()); act.log_data(losses["action_loss"].item())
+            dl.log_data(float(sum(is_dir)) / max(Blan, 1))
+            if print_log_freq != 0 and i % print_log_freq == 0:
+                print(f"(epoch {epoch}) (batch {i}/{len(dataloader_lan)-1}) "
+                      f"total={tot.latest():.4f} action={act.latest():.4f} dir_frac={dl.latest():.2f}")
+                if use_wandb and wandb is not None:
+                    wandb.log({"total_loss": losses["total_loss"].item(), "action_loss": losses["action_loss"].item()})
+
+
 @torch.no_grad()
 def evaluate_lan_only_ft(model, base_model, text_encoder, dataloader_lan, transform, device, max_batches=None):
     """

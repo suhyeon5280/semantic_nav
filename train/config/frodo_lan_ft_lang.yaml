@@ -1,0 +1,82 @@
+# =====================================================================
+# Language-AUGMENTED fine-tune of OmniVLA-edge (separate, opt-in pipeline).
+# On top of the language-only object-nav (nomad_traj_norm), a fraction of each batch is
+# turned into DIRECTION counterfactuals: the real trajectory is warped left/right/straight
+# (vint_train/data/lang_aug.warp_trajectory) and the prompt is replaced by a DIVERSE phrasing
+# of that direction (PHRASINGS_TRAIN). Goal: teach command->direction AND phrasing-level OOD
+# robustness, while preserving object grounding. Routes to train_lan_aug_ft.
+# Run:  python train.py -c config/frodo_lan_ft_lang.yaml
+# =====================================================================
+
+project_name: frodobot-gnm-lelan
+run_name: frodo_lan_ft_lang
+lan_only_ft: True                      # trimmed frodo_lan pipeline (main_lan_only_ft)
+
+# --- language augmentation (this pipeline's switch) ---
+lang_aug_ft: True                      # route to train_lan_aug_ft (direction + diverse phrasing)
+dir_frac: 0.3                          # fraction of each batch turned into direction counterfactuals
+warp_bend: 1.6                         # endpoint lateral warp (normalized units) for left/right
+
+# --- image-goal off (language + direction only) ---
+use_image_goal: False
+load_mbra: ./mbra.pth
+base_divergence_max: 0.5               # base-driving cap (image-goal divergence)
+
+# --- checkpoint + output ---
+load_edge_ckpt: ./omnivla-edge.pth
+output_dir: ./logs_frodo_lan_ft_lang
+timestamp_run: True
+
+# --- model params (must match omnivla-edge.pth) ---
+model_type: il_exaug_gps_map2_lan
+context_size: 5
+len_traj_pred: 8
+learn_angle: True
+obs_encoder: efficientnet-b0
+obs_encoding_size: 1024
+encoding_size: 256
+late_fusion: False
+mha_num_attention_heads: 4
+mha_num_attention_layers: 4
+mha_ff_dim_factor: 4
+clip_type: "ViT-B/32"
+
+# --- data ---
+image_size: [96, 96]
+image_size_clip: [224, 224]
+normalize: True
+context_type: temporal
+prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
+                   ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
+                   path, pathway, drop, mud, cobblestone, area]
+
+datasets_lan:
+  frodo_lan:
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/train/
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset/_cache/test/
+    backside: False
+    aug_seq: False
+    only_front: True
+    waypoint_spacing: 1
+
+# --- training ---
+batch_size: 24
+eval_batch_size: 24
+epochs: 12
+lr: 2e-5
+optimizer: adamw
+scheduler: "cosine"
+freeze_backbone: True
+split_by_episode: True                 # hold out an episode for clean (held-out) eval
+test_episodes: [episode_0020]          # train on 0021+0037, test on 0020
+warmup: True
+warmup_epochs: 2
+early_stop_patience: 3
+num_workers: 4
+gpu_ids: [0]
+seed: 0
+
+use_wandb: False
+print_log_freq: 20

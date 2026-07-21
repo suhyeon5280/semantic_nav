@@ -74,7 +74,7 @@ from vint_train.training.train_eval_loop import (
     train_eval_loop_il_exaug_dist_gnm_gps_map2_lan_bdd,
     load_model,
 )
-from vint_train.training.train_utils import train_lan_only_ft, evaluate_lan_only_ft, train_multimodal_ft
+from vint_train.training.train_utils import train_lan_only_ft, evaluate_lan_only_ft, train_multimodal_ft, train_lan_aug_ft
 #path_save_load = "."
 path_save_load = "/nfs/kun2/users/noriaki/checkpoints"
 
@@ -273,6 +273,15 @@ def main_lan_only_ft(config, device, transform):
                 project_folder=out, epoch=epoch,
                 print_log_freq=config.get("print_log_freq", 20),
                 use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
+            )
+        elif config.get("lang_aug_ft", False):
+            train_lan_aug_ft(
+                model=model, text_encoder=text_encoder, optimizer=optimizer,
+                dataloader_lan=train_loader, transform=transform, device=device,
+                project_folder=out, epoch=epoch,
+                print_log_freq=config.get("print_log_freq", 20),
+                use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
+                dir_frac=config.get("dir_frac", 0.3), warp_bend=config.get("warp_bend", 1.6),
             )
         else:
             train_lan_only_ft(
