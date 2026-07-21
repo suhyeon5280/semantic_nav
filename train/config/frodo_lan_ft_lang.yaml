@@ -14,9 +14,10 @@ lan_only_ft: True                      # trimmed frodo_lan pipeline (main_lan_on
 
 # --- language augmentation (this pipeline's switch) ---
 lang_aug_ft: True                      # route to train_lan_aug_ft (direction + diverse phrasing)
+use_lgx: True                          # Language-Grounded cross-attention (text tokens x visual grid)
 # contrastive direction task: dir_k observations x {left,right,straight}, lateral = command-driven
 dir_weight: 1.0                        # weight of the direction loss vs object-nav loss
-dir_k: 8                               # observations per step expanded x3 for the contrastive task
+dir_k: 4                               # observations per step expanded x3 for the contrastive task
 warp_bend: 4.0                         # command-driven endpoint lateral (normalized units)
 
 # --- image-goal off (language + direction only) ---
@@ -66,8 +67,8 @@ datasets_lan:
     waypoint_spacing: 1
 
 # --- training ---
-batch_size: 24
-eval_batch_size: 24
+batch_size: 12
+eval_batch_size: 12
 epochs: 12
 lr: 2e-5
 optimizer: adamw

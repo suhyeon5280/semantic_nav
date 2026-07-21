@@ -39,7 +39,7 @@ _TRAIN = os.path.dirname(_HERE)
 if _TRAIN not in sys.path:
     sys.path.insert(0, _TRAIN)
 os.chdir(_TRAIN)
-from vint_train.models.il.il import IL_gps_map_mask3_lan2
+from vint_train.models.il.il import IL_gps_map_mask3_lan2, clip_token_features
 
 IMG = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
@@ -70,9 +70,10 @@ def build(cfg):
         mha_num_attention_heads=cfg["mha_num_attention_heads"], mha_num_attention_layers=cfg["mha_num_attention_layers"], mha_ff_dim_factor=cfg["mha_ff_dim_factor"])
 
 
-def load_ckpt(p, cfg, dev):
+def load_ckpt(p, cfg, dev, use_lgx=False):
     m = build(cfg); sd = torch.load(p, map_location="cpu"); sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
     sd = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}; m.load_state_dict(sd, strict=False)
+    m.use_lgx = use_lgx
     return m.to(dev).eval()
 
 
@@ -142,7 +143,8 @@ def main():
     print(f"[grounding] split={args.split} | {len(scenes)} multi-object frames (>=2 objs, lateral sep>={args.min_sep}m)")
 
     txt, _ = clip.load(cfg["clip_type"]); txt.to(torch.float32).to(dev)
-    models = {"base": load_ckpt(base_path, cfg, dev), "fine-tuned": load_ckpt(args.ft, cfg, dev)}
+    models = {"base": load_ckpt(base_path, cfg, dev, use_lgx=False),
+              "fine-tuned": load_ckpt(args.ft, cfg, dev, use_lgx=bool(cfg.get("use_lgx", False)))}
 
     def endpoints_left(model, obs, clg, prompts):
         P = len(prompts)
@@ -152,8 +154,10 @@ def main():
         mp = torch.cat((IMG(z), IMG(z), obs_map), 1); clg_t = IMG(clg.unsqueeze(0).repeat(P, 1, 1, 1).to(dev))
         gp = torch.zeros(P, 4).to(dev); gm = torch.full((P,), 7, dtype=torch.long, device=dev)
         with torch.no_grad():
-            feat = txt.encode_text(clip.tokenize(prompts, truncate=True).to(dev))
-            a, _, _ = model(obs_t, gp, mp, IMG(z), gm, feat, clg_t)
+            tok = clip.tokenize(prompts, truncate=True).to(dev)
+            feat = txt.encode_text(tok)
+            tt, tv = (clip_token_features(txt, tok) if getattr(model, "use_lgx", False) else (None, None))
+            a, _, _ = model(obs_t, gp, mp, IMG(z), gm, feat, clg_t, tt, tv)
         return (a[:, -1, 1].cpu().numpy() * mws)   # endpoint lateral (m), + = left
 
     results = {}

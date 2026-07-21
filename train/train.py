@@ -177,6 +177,9 @@ def main_lan_only_ft(config, device, transform):
     ckpt_path = config["load_edge_ckpt"]
     print("Loading edge checkpoint from", ckpt_path)
     model = build_model()
+    model.use_lgx = bool(config.get("use_lgx", False))   # LGX cross-attn (opt-in); base has no lgx weights
+    if model.use_lgx:
+        print("[lgx] Language-Grounded cross-attention ENABLED (lgx module trained from scratch)")
     missing, unexpected = load_ckpt(model, ckpt_path)
     print(f"[ckpt] loaded. missing={len(missing)} unexpected={len(unexpected)}")
     if missing:

@@ -10037,6 +10037,10 @@ def train_lan_aug_ft(
     """
     import random as _random
     from vint_train.data.lang_aug import warp_trajectory, sample_phrasing, DIRECTIONS
+    from vint_train.models.il.il import clip_token_features
+    _use_lgx = getattr(model, "use_lgx", False)
+    def _tok_feats(tokens):
+        return clip_token_features(text_encoder, tokens) if _use_lgx else (None, None)
 
     model.train()
     if freeze_backbone:
@@ -10065,11 +10069,12 @@ def train_lan_aug_ft(
             tokens = clip.tokenize(obj_inst_lan, truncate=True).to(device)
             with torch.no_grad():
                 feat = text_encoder.encode_text(tokens)
+                tt_o, tv_o = _tok_feats(tokens)
             gp = goal_pos_lan.to(device)
             dis = torch.sqrt(gp[:, 1:2] ** 2 + gp[:, 0:1] ** 2) + 1e-6
             goal_pose = torch.cat((gp[:, 1:2], -gp[:, 0:1], gp[:, 1:2] / dis, -gp[:, 0:1] / dis), axis=1).to(device)
             goal_mask = torch.tensor([_random.choice([7, 7, 7, 8]) for _ in range(Blan)], dtype=torch.long, device=device)
-            action_pred, dist_pred, _ = model(obs_t, goal_pose, map_t, goal_img, goal_mask, feat, cur_large)
+            action_pred, dist_pred, _ = model(obs_t, goal_pose, map_t, goal_img, goal_mask, feat, cur_large, tt_o, tv_o)
             mask_lan = (goal_mask == 7) | (goal_mask == 8)
             obj_losses = _compute_losses_lan(
                 dist_label=distance_lan.float().to(device),
@@ -10097,9 +10102,11 @@ def train_lan_aug_ft(
             gp_d = torch.zeros(Bd, 4).to(device)
             gm_d = torch.full((Bd,), 7, dtype=torch.long, device=device)
             gimg_d = transform(torch.zeros(Bd, 3, 96, 96)).to(device)
+            tok_d = clip.tokenize(phr, truncate=True).to(device)
             with torch.no_grad():
-                feat_d = text_encoder.encode_text(clip.tokenize(phr, truncate=True).to(device))
-            dir_pred, _, _ = model(obs_d, gp_d, map_d, gimg_d, gm_d, feat_d, cur_d)
+                feat_d = text_encoder.encode_text(tok_d)
+                tt_d, tv_d = _tok_feats(tok_d)
+            dir_pred, _, _ = model(obs_d, gp_d, map_d, gimg_d, gm_d, feat_d, cur_d, tt_d, tv_d)
             dir_loss = F.mse_loss(dir_pred, tgt_d)
 
             total = obj_total + dir_weight * dir_loss

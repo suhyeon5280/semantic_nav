@@ -843,6 +843,12 @@ class IL_gps_map_mask3_lan(BaseModel):
         )
         
         self.film_model = build_film_model(8, 10, 128, 512)
+        # LGX (Language-Grounded cross-attention). Opt-in: set model.use_lgx = True externally;
+        # when off, forward skips self.lgx so behavior == base. (added to both lan variants; only
+        # IL_gps_map_mask3_lan2 is instantiated.)
+        self.use_lgx = False
+        self.lgx = LGXModule(text_dim=512, vis_dim=self.num_obs_features,
+                             hidden=256, out_dim=self.goal_encoding_size, heads=4)
                
         self.max_linvel = 0.5
         self.max_angvel = 1.0
@@ -908,7 +914,7 @@ class IL_gps_map_mask3_lan(BaseModel):
         self.avg_pool_mask = torch.cat([avep_mask_0, avep_mask_2, avep_mask_3, avep_mask_5, avep_mask_1, avep_mask_4, avep_mask_6, avep_mask_7, avep_mask_8], dim=0)
         
     def forward(
-        self, obs_img: torch.tensor, goal_pose: torch.tensor, map_images: torch.tensor, goal_img: torch.tensor, goal_mask: torch.tensor, feat_text: torch.tensor, current_img: torch.tensor,
+        self, obs_img: torch.tensor, goal_pose: torch.tensor, map_images: torch.tensor, goal_img: torch.tensor, goal_mask: torch.tensor, feat_text: torch.tensor, current_img: torch.tensor, text_tokens: torch.tensor = None, text_valid: torch.tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         # Get the goal encoding
@@ -916,7 +922,12 @@ class IL_gps_map_mask3_lan(BaseModel):
         inst_encoding = feat_text
         obsgoal_encoding_lan = self.film_model(current_img, inst_encoding)        
         obsgoal_encoding_lan_cat = obsgoal_encoding_lan.flatten(start_dim=1)
-        obsgoal_encoding_lan = self.compress_goal_enc_lan(obsgoal_encoding_lan_cat)  
+        obsgoal_encoding_lan = self.compress_goal_enc_lan(obsgoal_encoding_lan_cat)
+        # LGX residual: text tokens attend to the current-image visual grid, added to the FiLM
+        # language encoding (scene-grounded language). Skipped unless use_lgx and text_tokens given.
+        if getattr(self, "use_lgx", False) and text_tokens is not None:
+            _vg = self.obs_encoder.extract_features(current_img).flatten(2).transpose(1, 2)
+            obsgoal_encoding_lan = obsgoal_encoding_lan + self.lgx(text_tokens, _vg, text_valid)
         #print(obsgoal_encoding_lan.size(), obsgoal_encoding_lan_cat.size())
 
         if len(obsgoal_encoding_lan.shape) == 2:
@@ -1107,6 +1118,12 @@ class IL_gps_map_mask3_lan2(BaseModel):
         )
         
         self.film_model = build_film_model(8, 10, 128, 512)
+        # LGX (Language-Grounded cross-attention). Opt-in: set model.use_lgx = True externally;
+        # when off, forward skips self.lgx so behavior == base. (added to both lan variants; only
+        # IL_gps_map_mask3_lan2 is instantiated.)
+        self.use_lgx = False
+        self.lgx = LGXModule(text_dim=512, vis_dim=self.num_obs_features,
+                             hidden=256, out_dim=self.goal_encoding_size, heads=4)
                
         self.max_linvel = 0.5
         self.max_angvel = 1.0
@@ -1172,7 +1189,7 @@ class IL_gps_map_mask3_lan2(BaseModel):
         self.avg_pool_mask = torch.cat([avep_mask_0, avep_mask_2, avep_mask_3, avep_mask_5, avep_mask_1, avep_mask_4, avep_mask_6, avep_mask_7, avep_mask_8], dim=0)
         
     def forward(
-        self, obs_img: torch.tensor, goal_pose: torch.tensor, map_images: torch.tensor, goal_img: torch.tensor, goal_mask: torch.tensor, feat_text: torch.tensor, current_img: torch.tensor,
+        self, obs_img: torch.tensor, goal_pose: torch.tensor, map_images: torch.tensor, goal_img: torch.tensor, goal_mask: torch.tensor, feat_text: torch.tensor, current_img: torch.tensor, text_tokens: torch.tensor = None, text_valid: torch.tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         # Get the goal encoding
@@ -1180,7 +1197,12 @@ class IL_gps_map_mask3_lan2(BaseModel):
         inst_encoding = feat_text
         obsgoal_encoding_lan = self.film_model(current_img, inst_encoding)        
         obsgoal_encoding_lan_cat = obsgoal_encoding_lan.flatten(start_dim=1)
-        obsgoal_encoding_lan = self.compress_goal_enc_lan(obsgoal_encoding_lan_cat)  
+        obsgoal_encoding_lan = self.compress_goal_enc_lan(obsgoal_encoding_lan_cat)
+        # LGX residual: text tokens attend to the current-image visual grid, added to the FiLM
+        # language encoding (scene-grounded language). Skipped unless use_lgx and text_tokens given.
+        if getattr(self, "use_lgx", False) and text_tokens is not None:
+            _vg = self.obs_encoder.extract_features(current_img).flatten(2).transpose(1, 2)
+            obsgoal_encoding_lan = obsgoal_encoding_lan + self.lgx(text_tokens, _vg, text_valid)
         #print(obsgoal_encoding_lan.size(), obsgoal_encoding_lan_cat.size())
 
         if len(obsgoal_encoding_lan.shape) == 2:
@@ -1379,6 +1401,44 @@ class IntermediateFeatureExtractor(nn.Module):
         return self.layers(x)
 
         
+def clip_token_features(clip_model, tokenized_text):
+    """Per-token CLIP text features (B, L, 512) BEFORE [EOS] pooling, for LGX cross-attention.
+    Returns (features, valid_mask) where valid_mask marks non-pad token positions."""
+    x = clip_model.token_embedding(tokenized_text)
+    x = x + clip_model.positional_embedding
+    x = x.permute(1, 0, 2)
+    x = clip_model.transformer(x)
+    x = x.permute(1, 0, 2)
+    x = clip_model.ln_final(x)
+    return x.float(), (tokenized_text != 0)
+
+
+class LGXModule(nn.Module):
+    """Language-Grounded cross-attention: text tokens (query) attend to the current-image visual
+    grid (key/value), so words like 'left'/'wall' bind to scene regions. Produces a scene-grounded
+    language vector, added as a RESIDUAL to the FiLM language token (conservative: FiLM preserved).
+    """
+    def __init__(self, text_dim=512, vis_dim=1280, hidden=256, out_dim=1024, heads=4):
+        super().__init__()
+        self.tp = nn.Linear(text_dim, hidden)
+        self.vp = nn.Linear(vis_dim, hidden)
+        self.attn = nn.MultiheadAttention(hidden, heads, batch_first=True)
+        self.norm = nn.LayerNorm(hidden)
+        self.out = nn.Linear(hidden, out_dim)
+
+    def forward(self, text_tokens, vis_grid, text_valid=None):
+        q = self.tp(text_tokens.float())          # (B, L, hidden)
+        kv = self.vp(vis_grid)                    # (B, S, hidden)
+        a, _ = self.attn(q, kv, kv)               # each text token attends to the visual grid
+        a = self.norm(q + a)
+        if text_valid is not None:
+            m = text_valid.float().unsqueeze(-1)
+            pooled = (a * m).sum(1) / m.sum(1).clamp(min=1.0)
+        else:
+            pooled = a.mean(1)
+        return self.out(pooled)                   # (B, out_dim)
+
+
 class FiLMTransform(nn.Module):
     def __init__(self):
         super(FiLMTransform, self).__init__()
