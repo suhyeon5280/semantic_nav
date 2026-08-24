@@ -10,17 +10,16 @@
 
 ---
 
-## 브랜치 안내 (역할별)
+## 브랜치 안내
 
-목적별로 브랜치가 나뉘어 있습니다. 분기 관계: `lang-direction-ft` ← `episode-split-lang-eval` ← `main`.
+모든 작업이 **`main` 단일 브랜치**로 통합되었습니다 (이전의 역할별 feature 브랜치
+`episode-split-lang-eval`·`lang-direction-ft`·`lgx-cross-attn`은 내용이 모두 main에 포함되어
+정리·삭제됨). 일반 학습·사용은 `main`에서 하면 됩니다.
 
-| 브랜치 | 역할 | 핵심 내용 |
-|---|---|---|
-| **`main`** | **안정 파인튜닝 (기본 진입점)** | 언어전용(`use_image_goal: False`) + base-driving cap, **index-split(90/10, 데이터 최대 활용)**, eval 도구 정리(`train/eval/`), mws 0.125 통일, 프롬프트 blocklist(표면/구역 제외), 75/25 language/position mask. 일반 학습·사용은 여기서. |
-| **`feature/episode-split-lang-eval`** | **엄밀 평가용** | **에피소드 단위 hold-out**(`split_by_episode` + `test_episodes`)으로 train/test leakage 없는 일반화 평가 + 언어 진단 도구(`prompt_sensitivity.py`=언어 반응성, `grounding_test.py`=객체 선택 정확도, `direction_test.py`=방향 이해 대조검사). |
-| **`feature/lang-direction-ft`** | **실험: 방향·언어지시 학습** | episode-split 기반 위에, **방향 명령(left/right/straight) + OOD 표현**을 대조 counterfactual로 학습(`train_lan_aug_ft`, `vint_train/data/lang_aug.py`, `config/frodo_lan_ft_lang.yaml`). 결과: held-out에서 방향 delta +0.54, OOD 표현 +0.50, 객체 grounding 유지. ⚠️ 아직 **scene-free**(장애물 미고려) — 다음 목표는 "장애물 피하며 방향 따르기". 현재 연구 프론티어. |
-
-> 원격(`semantic_nav`)에는 `main`, `feature/episode-split-lang-eval`이 올라가 있고, `feature/lang-direction-ft`는 현재 로컬 작업 중입니다.
+main 하나에 아래가 모두 들어 있습니다:
+- **언어전용 파인튜닝 (①, 권장 기본)** — `train_lan_only_ft`. config: 대용량 `config/frodo_lan_ft_full_lang.yaml` / 소량 `config/frodo_lan_ft.yaml`. (자세한 방법·손실은 4-A/4-B)
+- **에피소드 단위 hold-out 평가** — `split_by_episode` + `test_episodes` (train/test leakage 없음) + 언어 진단 도구(`train/eval/`의 `prompt_sensitivity.py`=언어 반응성, `grounding_test.py`=객체 선택, `direction_test.py`=방향 대조).
+- **(폐기) 방향증강 ② / 멀티모달 ③ 코드도 아직 포함**되어 있습니다(`train_lan_aug_ft`, `train_multimodal_ft`, `lang_aug.py`, LGX, `config/frodo_lan_ft_lang.yaml`·`frodo_lan_ft_full.yaml`). 왜 폐기했는지는 **4-A** 참고. ①만 쓰면 됩니다.
 
 ---
 
