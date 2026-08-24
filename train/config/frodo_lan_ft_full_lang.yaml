@@ -1,0 +1,86 @@
+# =====================================================================
+# Fine-tune OmniVLA-edge (IL_gps_map_mask3_lan2) on the FULL LeLaN-format dataset.
+# >>> LARGE-DATASET, LANGUAGE-ONLY preset (method ①: train_lan_only_ft). <<<
+#   - dispatch: use_image_goal=False, lang_aug_ft absent  ->  main_lan_only_ft -> train_lan_only_ft
+#   - target = dataset's precomputed `nomad_traj_norm` (raw); NO teacher call.
+#   - mask 75/25 = language(7) / language+pose(8)  via random.choice([7,7,7,8])
+#   - loss = action_loss + 0.05*obj_loss + 0.05*act_smooth + 0.01*alpha*dist_loss  (_compute_losses_lan)
+# Difference vs the other presets:
+#   frodo_lan_ft.yaml       = SMALL data,  language-only (①), conservative (lr 2e-5, ep 12)
+#   frodo_lan_ft_full.yaml  = LARGE data,  MULTI-MODAL image-goal (③, MBRA teacher)
+#   frodo_lan_ft_lang.yaml  = language-aug DIRECTION contrastive (②, ±LGX)  [DISCARDED, see README 4-A]
+#   THIS file               = LARGE data,  language-only (①)  <-- the recommended full-data run
+# Run:  python train.py -c config/frodo_lan_ft_full_lang.yaml
+# =====================================================================
+
+project_name: frodobot-gnm-lelan
+run_name: frodo_lan_ft_full_lang
+lan_only_ft: True                      # -> main_lan_only_ft (trimmed frodo_lan pipeline)
+
+# --- language-only (method ①): keep image-goal OFF and lang-aug OFF ---
+use_image_goal: False                  # False -> train_lan_only_ft (not train_multimodal_ft)
+# lang_aug_ft: (absent)                # absent -> NOT train_lan_aug_ft (the discarded warp/LGX path)
+base_divergence_max: 0.5               # base-driving protection cap (active because use_image_goal=False)
+
+# --- checkpoint to fine-tune + output dir ---
+load_edge_ckpt: ./omnivla-edge.pth     # relative to train/
+output_dir: ./logs_frodo_lan_ft_full_lang
+timestamp_run: True                    # save each run to output_dir/<start-time>/ (no overwrite)
+
+# --- model params (MUST match omnivla-edge.pth) ---
+model_type: il_exaug_gps_map2_lan
+context_size: 5
+len_traj_pred: 8
+learn_angle: True
+obs_encoder: efficientnet-b0
+obs_encoding_size: 1024
+encoding_size: 256
+late_fusion: False
+mha_num_attention_heads: 4
+mha_num_attention_layers: 4
+mha_ff_dim_factor: 4
+clip_type: "ViT-B/32"
+
+# --- data ---
+image_size: [96, 96]
+image_size_clip: [224, 224]
+normalize: True
+context_type: temporal
+
+# Prompt filter: skip objects whose prompts only describe surface/terrain (not nav targets).
+prompt_blocklist: [asphalt, road, roads, roadway, roadways, pavement, paved, tarmac,
+                   ground, floor, surface, sidewalk, gravel, dirt, lane, lanes,
+                   path, pathway, drop, mud, cobblestone, area]
+
+datasets_lan:
+  frodo_lan:
+    # FULL dataset downloaded from HuggingFace (hoheng/omnivla_dataset).
+    # Each episode_XXXX/ holds {image, pickle_nomad}/ . train/test are writable LMDB-cache dirs.
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/_cache/train/
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/_cache/test/
+    backside: False
+    aug_seq: False
+    only_front: True
+    waypoint_spacing: 1
+
+# --- training (LARGE-data preset: official recipe + our fine-tuning discipline; see README 4-B) ---
+batch_size: 24                         # ~4GB free GPU; raise to 32 if more memory frees up
+eval_batch_size: 24
+epochs: 30                             # early-stop decides the real end
+lr: 1e-4                               # official OmniVLA-edge LR (safe here: only decoder/heads train)
+optimizer: adamw
+scheduler: "cosine"
+freeze_backbone: True                  # OUR discipline: freeze obs/goal/goal_img EfficientNet (protect base)
+split_by_episode: True                 # episode-level hold-out (no leakage)
+test_episodes: [episode_0010, episode_0020, episode_0030]   # held out for eval (finalize after download completes)
+warmup: True
+warmup_epochs: 3
+early_stop_patience: 5                 # stop if heading_cos (direction_err) doesn't improve for N epochs
+num_workers: 4
+gpu_ids: [0]
+seed: 0
+
+use_wandb: False
+print_log_freq: 20

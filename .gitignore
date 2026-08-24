@@ -19,3 +19,12 @@ train/infer_*.png
 # eval tool outputs (train/eval/): result folders + any loose PNGs (do not commit)
 train/eval/results/
 train/eval/*.png
+# generated analysis/visualization PNGs at repo root (cmp_*, percase_*, swap_demo, grid_heatmap, ...)
+/*.png
+# all image / data blobs anywhere (datasets, not source) — jpg images + pickle labels
+*.jpg
+*.jpeg
+*.pkl
+*.pickle
+# full dataset downloaded from HuggingFace (hoheng/omnivla_dataset): images + pkl + HF cache junk (.lock/.metadata)
+omnivla_dataset_hf/

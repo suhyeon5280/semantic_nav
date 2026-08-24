@@ -225,29 +225,28 @@ freeze_backbone: True
 > 에피소드를 물어올 수 있습니다.** 스모크 테스트엔 무해하지만, 본 학습에선 에피소드별 분리/경계 처리가
 > 필요할 수 있습니다(§6 참고).
 
-### 3-6. 프리셋 (소량 언어전용 vs 대용량 범용)
-두 개의 config를 준비해뒀습니다. **데이터만 `omnivla_dataset/`에 더 넣고 config만 고르면** 됩니다.
+### 3-6. 프리셋 (config 4종) — 코드 기준
+`train.py`의 `main_lan_only_ft`는 config 플래그로 **어느 파인튜닝 방법(①/②/③)** 을 부를지 결정합니다
+(dispatch: `train.py` L272-297). 아래는 실제 config 파일 값 기준입니다.
 
-**두 프리셋 모두 범용(언어 + 이미지-goal)** 을 학습합니다. 차이는 **데이터 규모에 맞춘 하이퍼파라미터**(백본 freeze / lr / epochs / split)뿐입니다.
+| config | 방법 | 라우팅 플래그 | `freeze_backbone` | `lr` | `epochs` | `split_by_episode` | 비고 |
+|---|---|---|---|---|---|---|---|
+| `frodo_lan_ft.yaml` | ① 언어전용 (소량) | `use_image_goal:False` | **True** | 2e-5 | 12 | True | 보수적, `test_episodes:[0020]`, base cap 0.5 |
+| **`frodo_lan_ft_full_lang.yaml`** ⭐ | ① 언어전용 (대용량) | `use_image_goal:False` | **True** | **1e-4** | 30 | True | **권장 본 학습**, `test:[0010,0020,0030]`, base cap 0.5 |
+| `frodo_lan_ft_full.yaml` | ③ 멀티모달(이미지-goal) | `use_image_goal:True` | **False** | 1e-4 | 40 | True | MBRA teacher 필요(3-7), cap 자동 비활성 |
+| `frodo_lan_ft_lang.yaml` | ② 방향증강 **[폐기]** | `lang_aug_ft:True`,`use_lgx:True` | True | 2e-5 | 12 | True | warp+LGX, **비권장** — 이유는 4-A |
 
-| | `config/frodo_lan_ft.yaml` (소량, 보수적) | `config/frodo_lan_ft_full.yaml` (대용량) |
-|---|---|---|
-| **학습 모달리티** | 언어/pose + 이미지-goal (mask 6·7·8) | 언어/pose + 이미지-goal (mask 6·7·8) |
-| `use_image_goal` / teacher | **True** / MBRA (`mbra.pth`) | **True** / MBRA (`mbra.pth`) |
-| `freeze_backbone` | **True** (시각 인코더 고정) | **False** (전체 학습) |
-| `lr` | 2e-5 | 1e-4 |
-| `epochs` | 12 | 40 |
-| `early_stop_patience` | 3 | 5 |
-| `split_by_episode` | **False** (인덱스 90/10) | **True** (에피소드 통째 held-out) |
-| `output_dir` | `./logs_frodo_lan_ft` | `./logs_frodo_lan_ft_full` |
-| prompt 필터 / cap | ON / **cap 없음** (MBRA 켜짐) | ON / **cap 없음** (MBRA 켜짐) |
+**dispatch 규칙** (`train.py` L272): `use_image_goal:True` → `train_multimodal_ft`(③) / 아니고 `lang_aug_ft:True` →
+`train_lan_aug_ft`(②) / 그 외 → `train_lan_only_ft`(①).
 
-- **`split_by_episode`**: 소량일 땐 False가 유리 — 에피소드 단위로 빼면 (3개 중 1개=33%처럼) 학습 데이터가 크게 줄기 때문. 대용량일 땐 True로 두면 test 에피소드가 train과 완전히 분리돼 **지표 신뢰도**가 높아짐(train/test 누수 없음). 캐시는 전략·프레임수별로 따로 생성되어 전환 시 자동 재빌드됩니다.
-
-- **소량(에피소드 몇 개)** → `frodo_lan_ft.yaml` (백본 고정·저LR로 과적합 방지).
-- **데이터 충분** → `frodo_lan_ft_full.yaml` (백본까지 당신 도메인에 맞춰 학습).
-- 두 프리셋 다 **MBRA 체크포인트 필요** (아래 3-7). 데이터 경로(`datasets_lan`)는 두 파일에서 동일하게 유지하세요.
-- **cap**: `use_image_goal: True`이면 이미지-goal이 학습 대상이므로 `base_divergence` cap은 **자동 비활성**입니다. 순수 언어전용으로 돌리고 싶을 때만 `use_image_goal: False` + `base_divergence_max: 0.5`로 base 주행 보호 cap을 켤 수 있습니다.
+- **본 학습 권장** = ⭐ `frodo_lan_ft_full_lang.yaml` (①을 전체 데이터로). 공식 레시피(손실·75/25·lr 1e-4) +
+  우리 규율(freeze·episode hold-out) 조합 — 4-B 참고.
+- **`split_by_episode:True`** → `test_episodes`의 에피소드를 통째 hold-out(누수 없음). 소량이면 hold-out
+  비중이 커지니 에피소드 수를 줄이거나 `False`(인덱스 90/10)로. 캐시(`_cache/`)는 전략·프레임수별로 생성되어 전환 시 자동 재빌드됩니다.
+- **base cap**: `use_image_goal:False`(①)일 때만 `base_divergence_max`가 활성(기본 주행 보호). ③은 이미지-goal이
+  학습 대상이라 자동 비활성.
+- ③만 **MBRA 체크포인트 필요**(아래 3-7). 데이터 경로(`datasets_lan`)는 파일마다 각자 지정합니다
+  (①소량=`omnivla_dataset/`, ①대용량=`omnivla_dataset_hf/`).
 
 ### 3-7. 범용(이미지-goal) 학습 — MBRA teacher 준비
 LeLaN 데이터는 원본 OmniVLA에서 **두 가지 역할**로 쓰입니다: (1) 언어/pose → 궤적 라벨(`nomad_traj_norm`, 우리 데이터에 이미 있음), (2) **이미지-goal → MBRA teacher가 런타임에 생성**하는 궤적. `frodo_lan_ft_full.yaml`은 이 둘을 모두 학습하는 **범용 모델**입니다.
@@ -285,7 +284,7 @@ wget "https://huggingface.co/NHirose/MBRA/resolve/main/mbra.pth" -O mbra.pth
 **학습 루프** `train_lan_only_ft` / `main_lan_only_ft`:
 1. LeLaN 배치에서 obs(context+현재), 객체 crop, CLIP 이미지, 객체 pose, prompt, `nomad_traj_norm`을 받음.
 2. CLIP로 prompt → 텍스트 특징. 위성지도/맵 채널은 0(언어 조건이므로).
-3. goal mask `{7=언어만, 8=언어+GPS}` 샘플 → 모델 forward.
+3. goal mask를 **75/25**로 샘플(`random.choice([7,7,7,8])`: 7=언어만 75%, 8=언어+pose 25%) → 모델 forward.
 4. 손실: `action_loss`(궤적 vs `nomad_traj_norm`, 주 손실) + `obj_loss`(마지막 waypoint vs 객체 pose) + dist/smooth.
 5. **teacher 호출 없음.** CLIP은 freeze.
 
@@ -313,8 +312,69 @@ wget "https://huggingface.co/NHirose/MBRA/resolve/main/mbra.pth" -O mbra.pth
   이 경우 LR을 더 낮추거나, epoch를 줄이거나, `decoder`도 일부 freeze하세요.
 - 원본 `omnivla-edge.pth`(base)는 학습 내내 frozen 사본으로 메모리에 유지되어 비교 기준이 됩니다.
 
-순수 언어만 학습하려면 `train_utils.py`의 `random.choice([7, 8])`를 `[7]`로 바꾸세요.
+순수 언어만 학습하려면 `train_utils.py`의 `random.choice([7, 7, 7, 8])`를 `[7]`로 바꾸세요(mask 8=언어+pose 제거).
 풀 파인튜닝을 원하면 config에 `freeze_backbone: False`.
+
+---
+
+## 4-A. 파인튜닝 방법 정리 — 시도한 것과 폐기한 것
+
+세 가지 언어 파인튜닝 방법을 실험했습니다. **셋 다 공통으로** `_compute_losses_lan`
+(`action_loss` + `obj_loss`×0.05 + `act_smooth`×0.05 + `dist_loss`×0.01α)과
+**75/25 mask**(`random.choice([7,7,7,8])` = 언어(7) 75% / 언어+pose(8) 25%)를 씁니다.
+dispatch는 `main_lan_only_ft`(train.py)에서 config 플래그로 갈립니다.
+
+| # | 방법 (loop) | 무엇을 더했나 | 결과 / 판정 |
+|---|---|---|---|
+| ① | `train_lan_only_ft` | (기본) 순수 언어 object-nav, 증강 없음 | base 대비 action MSE −44%, reach<0.5m 6→48% → **유지(기본)** |
+| ② | `train_lan_aug_ft` (±LGX) | 방향 warp 대조증강 + LGX 교차어텐션 | 순 기여 미검증 → **폐기** |
+| ③ | `train_multimodal_ft` | image-goal(mask6) + MBRA(ExAug) teacher | 공식 멀티모달 재현이나 우리 목표(언어)와 별개, 자원 과함 → **보류** |
+
+**폐기/보류 이유**
+- **② 방향 warp** ([`lang_aug.py`](train/vint_train/data/lang_aug.py)): 궤적이 객체로 휘는 현상이 warp
+  덕인 줄 알았으나, **증강 없는 ①도 동일하게 휨** → 휨의 원인은 `obj_loss`였고 warp의 순 기여를
+  분리 입증 못함. `mode="replace"`는 lateral을 명령대로 순수 대체(`out[:,1]=bend_profile`)해
+  **장면(장애물)을 무시(scene-blind)** → 위험. 이득 범위도 방향+표현 OOD로 좁음.
+- **② LGX**: SWAP에서 LGX(체크포인트 `18_17_45`) ≈ no-LGX(`16_58_49`)로 **관측 가능한 이득 0**.
+  시각 격자에 **2D 위치인코딩이 없어** 단어↔영역 공간결속이 원리상 불가.
+- **외부 grounder 2단계(설계만)**: 세밀 언어를 외부 grounder로 pose화 → edge는 pose 항법.
+  "edge 자체가 이해해야 하는데 외부 grounder는 edge의 장점을 희석"이라 **채택 안 함**.
+- **grid/heatmap grounding 프로토타입(frozen CLIP 위 head만)**: CLIP-ROI 선택 ~63→72%(노이즈 큼),
+  [EOS]-grid 57%(baseline 이하), token-LGX grid ~랜덤 → **tiny data에선 CLIP baseline도 못 넘음**.
+  → 병목은 아키텍처가 아니라 **데이터**라는 결론.
+
+> **결론**: 검증되어 유지된 건 **① `train_lan_only_ft` 하나**. 화려한 증강(warp/LGX/grid)은 현재
+> 데이터·구현에서 이득이 없거나 위험해 폐기. 다음 우선순위는 **증강이 아니라 데이터 확충**.
+
+## 4-B. 공식 레시피 vs 우리 파인튜닝 규율
+
+우리 기본 학습(①)은 **"공식 OmniVLA-edge의 레시피(무엇을·어떤 목표로 학습)"는 그대로 따르고,
+"소규모 파인튜닝에서 base를 안 망치는 방법"만 우리 규율로 감쌌습니다.** 목적함수 자체는 공식과 동일.
+
+**공식에서 그대로 (레시피)**
+| 항목 | 값 |
+|---|---|
+| 모델 | `IL_gps_map_mask3_lan2` (`il_exaug_gps_map2_lan`) |
+| 주 손실 | `action_loss` = MSE(예측궤적, GT `nomad_traj_norm`) — 공식 loop도 `_compute_losses`로 동일 |
+| 보조 손실 | `obj_loss`(끝점→객체, LeLaN J_obj) + `act_smooth` + `dist_loss` |
+| 모달리티 mask | **75/25** = 언어(7) / 언어+pose(8) |
+| 궤적 표현 | (8,4) = [x_fwd, y_left, cos, sin], 정규화 |
+| CLIP text | 항상 frozen |
+| 학습률 | **1e-4** (대용량 데이터 기준; 소량이면 2e-5) |
+
+**우리 파인튜닝 규율 (공식과 다르게/추가)**
+| 항목 | 우리 | 공식 | 이유 |
+|---|---|---|---|
+| 출발점 | `omnivla-edge.pth`에서 FT | 처음부터 학습 | 강한 base 재활용 |
+| backbone | **frozen** | 학습(no-freeze) | base 지각 보호(forgetting 방지)·메모리 |
+| 데이터 | 우리 LeLaN(frodo)만 | frodobot+GNM+LeLaN+BDD | 목표=언어 항법 |
+| teacher | 없음(precomputed `nomad_traj`) | NoMaD/MBRA | 런타임 단순화 |
+| hold-out | **episode 단위**(`test_episodes`) | 대규모 혼합 val | 누수 없는 일반화 평가 |
+| 체크포인트 선택 | **`heading_cos`**(방향) 기준 best + early-stop | (없음) | depth가 noisy → 방향이 robust |
+| base 보호 | `base_divergence_max` cap(옵션) | (없음) | 기본 주행 붕괴 감지 |
+
+> `heading_cos`는 **학습 손실이 아니라 체크포인트 선택에만** 쓰입니다(학습은 공식 `action_loss` 그대로).
+> 완전 공식(no-freeze 대규모)은 우리 데이터·GPU엔 부적절하고 base를 망칠 수 있어 채택하지 않습니다.
 
 ---
 
