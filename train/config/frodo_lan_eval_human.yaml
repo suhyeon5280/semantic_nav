@@ -56,10 +56,10 @@ datasets_lan:
   frodo_lan:
     # FULL dataset downloaded from HuggingFace (hoheng/omnivla_dataset).
     # Each episode_XXXX/ holds {image, pickle_nomad}/ . train/test are writable LMDB-cache dirs.
-    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/
-    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/
-    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/_cache/train/
-    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_hf/_cache/test/
+    image:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_human/
+    pickle: /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_human/
+    train:  /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_human/_cache/train/
+    test:   /home/shy/suhyeon/OmniVLA_edge/omnivla_dataset_human/_cache/test/
     backside: False
     aug_seq: False
     only_front: True
@@ -74,7 +74,7 @@ optimizer: adamw
 scheduler: "cosine"
 freeze_backbone: True                  # OUR discipline: freeze obs/goal/goal_img EfficientNet (protect base)
 split_by_episode: True                 # episode-level hold-out (no leakage)
-test_episodes: [episode_0010, episode_0020, episode_0030]   # held out for eval (finalize after download completes)
+test_episodes: [episode_0761, episode_0762, episode_0763]
 warmup: True
 warmup_epochs: 3
 early_stop_patience: 999               # PURE mode: no early stop (our addition); run all epochs, save every epoch

@@ -28,3 +28,6 @@ train/eval/*.png
 *.pickle
 # full dataset downloaded from HuggingFace (hoheng/omnivla_dataset): images + pkl + HF cache junk (.lock/.metadata)
 omnivla_dataset_hf/
+omnivla_dataset_human/
+omnivla_dataset_human_mix/
+results_full_lang_pure/

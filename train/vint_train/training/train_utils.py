@@ -175,14 +175,21 @@ def _compute_losses_lan(
     alpha: float,
     learn_angle: bool,
     image_solo: bool,
-    sate_solo: bool,    
+    sate_solo: bool,
     action_mask: torch.Tensor = None,
+    obj_weight: float = 0.05,
+    dir_weight: float = 0.0,
 ):
     """
     Compute losses for distance and action prediction.
 
     """
     obj_loss = F.mse_loss(pose_obj_label, pose_obj_pred)
+    # direction-only loss: angle between predicted endpoint and target pose as UNIT vectors,
+    # so it pulls heading toward the target WITHOUT changing trajectory length (magnitude-invariant).
+    _pe = pose_obj_pred / (pose_obj_pred.norm(dim=-1, keepdim=True) + 1e-6)
+    _pt = pose_obj_label / (pose_obj_label.norm(dim=-1, keepdim=True) + 1e-6)
+    dir_loss = (1.0 - (_pe * _pt).sum(dim=-1)).mean()
     act_smooth = F.mse_loss(action_pred[:,0:-1], action_pred[:,1:])
     
     dist_loss = F.mse_loss(dist_pred.squeeze(-1), dist_label.float())
@@ -234,7 +241,8 @@ def _compute_losses_lan(
     elif sate_solo:
         total_loss = (1 - alpha) * action_loss + 0.05*act_smooth
     else:
-        total_loss = alpha * 1e-2 * dist_loss + (1 - alpha) * action_loss + 0.05*obj_loss + 0.05*act_smooth
+        total_loss = alpha * 1e-2 * dist_loss + (1 - alpha) * action_loss + obj_weight*obj_loss + dir_weight*dir_loss + 0.05*act_smooth
+    results["dir_loss"] = dir_loss
     results["total_loss"] = total_loss
 
     return results
@@ -9886,6 +9894,8 @@ def train_lan_only_ft(
     print_log_freq: int = 20,
     use_wandb: bool = False,
     freeze_backbone: bool = False,
+    obj_weight: float = 0.05,
+    dir_weight: float = 0.0,
 ):
     """
     Language-only fine-tune of OmniVLA-edge (IL_gps_map_mask3_lan2) on `frodo_lan` data.
@@ -9993,6 +10003,8 @@ def train_lan_only_ft(
                 image_solo=False,
                 sate_solo=False,
                 action_mask=action_mask,
+                obj_weight=obj_weight,
+                dir_weight=dir_weight,
             )
 
             optimizer.zero_grad()

@@ -211,6 +211,16 @@ def main():
         preds[name] = a.cpu().numpy()
         print(f"loaded {name}: {p}")
 
+    # global shared axis limits across ALL panels (identical x/y scale everywhere -> fair comparison)
+    _xs, _ys = [0.0], [0.0]
+    for r in range(B):
+        for tr in [gts[r], *[preds[n][r] for n in preds]]:
+            _xs += list(np.concatenate([[0], tr[:, 1] * mws])); _ys += list(np.concatenate([[0], tr[:, 0] * mws]))
+        _xs.append(float(objposes[r][1])); _ys.append(float(objposes[r][0]))
+    _px = (max(_xs) - min(_xs)) * 0.08 + 0.1; _py = (max(_ys) - min(_ys)) * 0.08 + 0.1
+    GXLO, GXHI = min(_xs) - _px, max(_xs) + _px
+    GYLO, GYHI = min(_ys) - _py, max(_ys) + _py
+
     # ---- plot: N rows x 2 cols (scene | trajectory) ----
     colors = ["#9aa0a6", "#4E79A7", "#F28E2B", "#59A14F", "#B07AA1", "#E15759", "#76B7B2", "#EDC948"]
     fig, axes = plt.subplots(B, 2, figsize=(9, 3.6 * B), dpi=130, squeeze=False)
@@ -228,7 +238,7 @@ def main():
         for i, (name, pr) in enumerate(preds.items()):
             lx, fy = path(pr[r]); axt.plot(lx, fy, "-o", color=colors[i % len(colors)], lw=1.8, ms=3, label=name)
         axt.plot(0, 0, "ks", ms=8); axt.plot(objposes[r][1], objposes[r][0], "r*", ms=16, label="object", zorder=6)
-        axt.set_aspect("equal", "datalim"); axt.invert_xaxis()
+        axt.set_aspect("equal"); axt.set_xlim(GXHI, GXLO); axt.set_ylim(GYLO, GYHI)  # shared scale + inverted x (left)
         axt.axhline(0, color="gray", lw=.5, alpha=.3); axt.axvline(0, color="gray", lw=.5, alpha=.3)
         axt.set_xlabel("left (m)", fontsize=8); axt.set_ylabel("forward (m)", fontsize=8); axt.tick_params(labelsize=7)
         if r == 0:

@@ -294,6 +294,8 @@ def main_lan_only_ft(config, device, transform):
                 project_folder=out, epoch=epoch,
                 print_log_freq=config.get("print_log_freq", 20),
                 use_wandb=config["use_wandb"], freeze_backbone=freeze_backbone,
+                obj_weight=config.get("obj_loss_weight", 0.05),
+                dir_weight=config.get("dir_loss_weight", 0.0),
             )
         if scheduler is not None:
             scheduler.step()

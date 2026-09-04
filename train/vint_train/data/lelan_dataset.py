@@ -362,8 +362,11 @@ class LeLaN_Dataset(Dataset):
                 image_bytes = bytes(image_buffer)             
             image_bytes = io.BytesIO(image_bytes)         
             return img_path_to_data_front(image_bytes, self.image_size)
-        except TypeError:
-            print(f"Failed to load image {image_path}")
+        except Exception:
+            # rare corrupt/truncated image (from an interrupted download) -> black fallback
+            # so a single bad frame can't crash a multi-hour training run.
+            print(f"[skip] corrupt/missing image {image_path}")
+            return torch.zeros(3, 96, 96)
 
     def _resize_norm(self, image, size):
         return TF.resize(image, size)
@@ -870,8 +873,11 @@ class LeLaN_Dataset_multi(Dataset):
                 image_bytes = bytes(image_buffer)             
             image_bytes = io.BytesIO(image_bytes)         
             return img_path_to_data_front(image_bytes, self.image_size)
-        except TypeError:
-            print(f"Failed to load image {image_path}")
+        except Exception:
+            # rare corrupt/truncated image (from an interrupted download) -> black fallback
+            # so a single bad frame can't crash a multi-hour training run.
+            print(f"[skip] corrupt/missing image {image_path}")
+            return torch.zeros(3, 96, 96)
 
     def _resize_norm(self, image, size):
         return TF.resize(image, size)
@@ -1407,8 +1413,11 @@ class LeLaN_Dataset_multi(Dataset):
                 image_bytes = bytes(image_buffer)             
             image_bytes = io.BytesIO(image_bytes)         
             return img_path_to_data_front(image_bytes, self.image_size)
-        except TypeError:
-            print(f"Failed to load image {image_path}")
+        except Exception:
+            # rare corrupt/truncated image (from an interrupted download) -> black fallback
+            # so a single bad frame can't crash a multi-hour training run.
+            print(f"[skip] corrupt/missing image {image_path}")
+            return torch.zeros(3, 96, 96)
 
     def _resize_norm(self, image, size):
         return TF.resize(image, size)
